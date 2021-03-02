@@ -1,7 +1,57 @@
 using CSV, DataFrames
 
-function load(filename)
+function load(filename, strat="leave_out_last")
     df = CSV.read(filename, DataFrame, delim='\t', header=["user", "item", "rating", "utc"])
     df[:, "hit"] = df.rating .>= 3
-    return df[:, ["user", "item", "hit"]]
+
+    # renumber users and items so they are continuous indices
+    count = 1
+    item_d = Dict()
+    for item in df.item
+        if !haskey(item_d, item)
+            item_d[item] = count
+            count += 1
+        end
+    end
+
+    count = 1
+    user_d = Dict()
+    for item in df.user
+        if !haskey(user_d, item)
+            user_d[item] = count
+            count += 1
+        end
+    end
+
+    df[:, "user"] = map(x -> user_d[x], df.user)
+    df[:, "item"] = map(x -> item_d[x], df.item)
+
+    cols = ["user", "item", "hit"]
+    
+    if strat == "random_holdout"
+        shuffled = df[shuffle(1:end), :]
+        num_train = Int(length(df.user) * 0.8)
+        train = df[1:num_train, cols]
+        test = df[num_train:end, cols]
+        return train, test
+
+    elseif strat == "leave_out_last"
+        num_users = length(unique(df.user))
+        num_negatives_per_user = 100
+        df[:, "is_test"] = fill(false, length(df.user))
+        test_negatives = zeros(num_users, num_negatives_per_user)
+        all_items = unique(df.item)
+        for group in groupby(df, :user)
+            group[end, "is_test"] = true
+            seen_items = group[1:end-1, "item"]
+            unseen_items = setdiff(all_items, seen_items)
+            test_negatives[group[1, "user"], :] = shuffle(unseen_items)[1:100]
+        end
+
+        train = df[df.is_test .== false, cols]
+        test_hits = df[df.is_test .== true, cols]
+        return train, test_hits, test_negatives
+            
+    end
+    
 end
