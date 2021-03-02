@@ -1,13 +1,15 @@
 using CSV, DataFrames
 
 function load(filename; delim="\t", strat="leave_out_last")
-    df = CSV.read(filename, DataFrame, delim=delim, header=["user", "item", "rating", "utc"])
-    df[:, "hit"] = df.rating .>= 0
+    df = CSV.read(filename, DataFrame, delim=delim, header=["orig_user", "orig_item", "rating", "utc"])
+    
+    # can implement a hit threshold here.
+    #df[:, "hit"] = df.rating .>= 0
 
     # renumber users and items so they are continuous indices
     count = 1
     item_d = Dict()
-    for item in df.item
+    for item in df.orig_item
         if !haskey(item_d, item)
             item_d[item] = count
             count += 1
@@ -16,18 +18,19 @@ function load(filename; delim="\t", strat="leave_out_last")
 
     count = 1
     user_d = Dict()
-    for item in df.user
-        if !haskey(user_d, item)
-            user_d[item] = count
+    for user in df.orig_user
+        if !haskey(user_d, user)
+            user_d[user] = count
             count += 1
         end
     end
 
-    df[:, "user"] = map(x -> user_d[x], df.user)
-    df[:, "item"] = map(x -> item_d[x], df.item)
+    df[:, "user"] = map(x -> user_d[x], df.orig_user)
+    df[:, "item"] = map(x -> item_d[x], df.orig_item)
     num_items = length(unique(df.item))
+    num_users = length(unique(df.user))
 
-    cols = ["user", "item", "hit"]
+    cols = ["user", "item"]
     
     if strat == "random_holdout"
         shuffled = df[shuffle(1:end), :]
@@ -37,7 +40,7 @@ function load(filename; delim="\t", strat="leave_out_last")
         return train, test
 
     elseif strat == "leave_out_last"
-        num_users = length(unique(df.user))
+        df = sort(df, [:user, :utc])
         num_negatives_per_user = 100
         df[:, "is_test"] = fill(false, length(df.user))
         test_negatives = zeros(num_users, num_negatives_per_user)
@@ -46,12 +49,12 @@ function load(filename; delim="\t", strat="leave_out_last")
             group[end, "is_test"] = true
             seen_items = group[1:end-1, "item"]
             unseen_items = setdiff(all_items, seen_items)
-            test_negatives[group[1, "user"], :] = shuffle(unseen_items)[1:100]
+            test_negatives[group[1, "user"], :] = shuffle(unseen_items)[1:num_negatives_per_user]
         end
 
         train = df[df.is_test .== false, cols]
         test_hits = df[df.is_test .== true, cols]
-        return train, test_hits, test_negatives, num_items
+        return train, test_hits, test_negatives, num_users, num_items
             
     end
     
