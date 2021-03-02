@@ -17,12 +17,14 @@ Details:
 =#
 
 using Random, Distributions, LinearAlgebra, CSV, DataFrames
+using Printf
+
 include("./data.jl")
 
 Random.seed!(123) # Setting the seed
 
-train, test, test_negatives = load("ml-100k/u.data")
-#test = load("ml-100k/u1.test")
+train, test, test_negatives, num_items = load("ml-100k/u.data", delim="\t")
+#train, test, test_negatives, num_items = load("ml-1m/ratings.dat", delim="::", strat="leave_out_last")
 
 # init a random user embeddings and item embeddings. normal var w/ mean 0 and stdev by param
 # vector that is # user x embedding dimensions
@@ -48,8 +50,8 @@ epochs = 10
 embedding_dim = 16
 regularization = 0.005
 num_neg = 8
-lr = 0.002
-st_dev = 0.01
+lr = 0.2
+st_dev = 0.1
 
 config = experiment_config(
     epochs, embedding_dim,
@@ -57,30 +59,29 @@ config = experiment_config(
     lr, st_dev
 )
 
-d = Normal(0, config.st_dev)
+dist = Normal(0, config.st_dev)
 
 num_users = length(unique(train.user))
-num_items = length(unique(train.item))
 
 #num_user = 10
 # user embedding
-u_e = rand(d, num_users, config.embedding_dim)
+u_e = rand(dist, num_users, config.embedding_dim)
 # item embedding
-i_e = rand(d, num_items, config.embedding_dim)
+i_e = rand(dist, num_items, config.embedding_dim)
 
 # user bias
 u_b = zeros(num_users)
 # item bias
 i_b = zeros(num_items)
 # global bias
-b = 0
+b = 0.0
 
 model = mf_model(u_e, i_e, u_b, i_b, b)
 
-function predict_one(m, u_index, i_index)
+function predict_one(m, user, item)
 # bias, user bias, item bias, user embedding, item embedding
-    return m.b + m.u_b[u_index] + m.i_b[i_index] + dot(
-        m.u_e[u_index], m.i_e[i_index]
+    return m.b + m.u_b[user] + m.i_b[item] + dot(
+        m.u_e[user], m.i_e[item]
     )
 end
 
@@ -88,13 +89,13 @@ predict_one(model, 1, 2)
 
 function predict(model, users, items)
     num_examples = length(users)
-    predictions = zeros(num_examples)
+    preds = zeros(num_examples)
     for i = 1:num_examples
-        u_index = users[i]
-        i_index = items[i]
-        predictions[i] = predict_one(model, u_index, i_index)
+        user = users[i]
+        item = items[i]
+        preds[i] = predict_one(model, user, item)
     end
-    return predictions
+    return preds
 end
 
 
@@ -126,12 +127,14 @@ function convert_implicit_triplets(model, pos_pairs, num_neg)
 end
 
 
-function fit(model, config, pos_pairs)
+function fit!(model, config, pos_pairs)
     triplets = convert_implicit_triplets(model, pos_pairs, config.num_neg)
     triplets = triplets[shuffle(1:end), :]
 
     # Iterate over all examples and perform one SGD step.
     num_examples = size(triplets)[1]
+
+    print("fitting with $num_examples examples")
 
     summed_loss = 0.0
 
@@ -141,29 +144,31 @@ function fit(model, config, pos_pairs)
         i_e = model.i_e[item, :]
         u_b = model.u_b[user]
         i_b = model.i_b[item]
+        reg = config.reg
         pred = predict_one(model, user, item)
 
         if pred > 0
             # sigmoid
-            one_plus_exp_neg_pred = 1 / (1 +  exp(-pred))
+            one_plus_exp_neg_pred = 1.0 + exp(-pred)
             sigmoid = 1.0 / one_plus_exp_neg_pred
 
-            # if rating = 0, add the pred. if rating = 1, don't.
-            loss = log(one_plus_exp_neg_pred) + ((1 - hit) * pred)
+            loss = log(one_plus_exp_neg_pred) + (1 - hit) * pred
         else
             exp_pred = exp(pred)
             sigmoid = exp_pred / (1.0 + exp_pred)
             loss = log(1.0 + exp_pred) - hit * pred
         end
+        #loss = -1 * (hit * log(pred) + (1-hit)*log(1-pred))
 
         grad = hit - sigmoid
         
-        model.u_e[user, :] += lr * (grad * i_e - config.reg  * u_e)
-        model.i_e[item, :] += lr * (grad * u_e - config.reg  * i_e)
+        model.u_e[user, :] += lr * (grad * i_e - reg  * u_e)
+        model.i_e[item, :] += lr * (grad * u_e - reg  * i_e)
 
-        model.u_b[user] += lr * (grad - config.reg  * u_b)
-        model.i_b[item] += lr * (grad - config.reg  * i_b)
-        model.b += lr * (grad - config.reg  * model.b)
+        model.u_b[user] += lr * (grad - reg  * u_b)
+        model.i_b[item] += lr * (grad - reg  * i_b)
+        
+        model.b += lr * (grad - reg  * model.b)
 
         summed_loss += loss
     end
@@ -181,7 +186,6 @@ function evaluate(model, test_ratings, test_negatives, k)
         triplet = test_ratings[i, :]
         negatives = test_negatives[i, :]
         hit, ndcg = eval_one_rating(model, triplet, negatives, k)
-        print(hit, ndcg)
         append!(hits, hit)
         append!(ndcgs, ndcg)
     end
@@ -235,13 +239,19 @@ function get_ndcg(ranked, target)
     return 0
 end
 
-using Printf
+test_hits_arr = convert(Array{Int64}, test)
+test_neg_arr = convert(Array{Int64}, test_negatives)
+k = 10
 
-for i=1:50
+rand_hits, rand_ndcgs = evaluate(model, test_hits_arr, test_neg_arr, k)
+rand_hr = mean(rand_hits)
+rand_ndcg = mean(rand_ndcgs)
+print("HR: $rand_hr | NDCG: $rand_ndcg\n")
+for i=1:config.epochs
     print("=== epoch $i\n")
-    mean_loss = fit(model, config, train[train.hit .== true, ["user", "item"]])
-    hits, ndcgs = evaluate(model, convert(Array{Int64}, test), convert(Array{Int64}, test_negatives), 10);
-    mean_hits = mean(hits)
-    mean_ndcg = mean(ndcgs)
-    print("mean train loss: $mean_loss | mean hit rate: $mean_hits | mean ndcg: $mean_ndcg\n")
+    mean_loss = fit!(model, config, train[train.hit .== true, ["user", "item"]])
+    hits, ndcgs = evaluate(model, test_hits_arr, test_neg_arr, k)
+    hr = mean(hits)
+    ndcg = mean(ndcgs)
+    print("mean train loss: $mean_loss | HR: $hr | NDCG: $ndcg\n")
 end
