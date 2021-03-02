@@ -1,8 +1,8 @@
 using CSV, DataFrames
 
-function load(filename, strat="leave_out_last")
-    df = CSV.read(filename, DataFrame, delim='\t', header=["user", "item", "rating", "utc"])
-    df[:, "hit"] = df.rating .>= 3
+function load(filename; delim="\t", strat="leave_out_last")
+    df = CSV.read(filename, DataFrame, delim=delim, header=["user", "item", "rating", "utc"])
+    df[:, "hit"] = df.rating .>= 0
 
     # renumber users and items so they are continuous indices
     count = 1
@@ -25,6 +25,7 @@ function load(filename, strat="leave_out_last")
 
     df[:, "user"] = map(x -> user_d[x], df.user)
     df[:, "item"] = map(x -> item_d[x], df.item)
+    num_items = length(unique(df.item))
 
     cols = ["user", "item", "hit"]
     
@@ -50,7 +51,7 @@ function load(filename, strat="leave_out_last")
 
         train = df[df.is_test .== false, cols]
         test_hits = df[df.is_test .== true, cols]
-        return train, test_hits, test_negatives
+        return train, test_hits, test_negatives, num_items
             
     end
     
