@@ -4,7 +4,7 @@ function load(filename; delim="\t", strat="leave_out_last")
     df = CSV.read(filename, DataFrame, delim=delim, header=["orig_user", "orig_item", "rating", "utc"])
     
     # can implement a hit threshold here.
-    #df[:, "hit"] = df.rating .>= 0
+    df[:, "hit"] = df.rating .>= 0
 
     # renumber users and items so they are continuous indices
     count = 1
@@ -30,7 +30,7 @@ function load(filename; delim="\t", strat="leave_out_last")
     num_items = length(unique(df.item))
     num_users = length(unique(df.user))
 
-    cols = ["user", "item"]
+    cols = ["user", "item", "hit"]
     
     if strat == "random_holdout"
         shuffled = df[shuffle(1:end), :]

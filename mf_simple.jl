@@ -58,9 +58,9 @@ function predict(model, users, items)
     Make a prediction for each user x item.
         users - an array of users. Must be same lenght as items.
     """
-    num_examples = length(users)
-    preds = zeros(num_examples)
-    for i = 1:num_examples
+    n_examples = length(users)
+    preds = zeros(n_examples)
+    for i = 1:n_examples
         user = users[i]
         item = items[i]
         preds[i] = predict_one(model, user, item)
@@ -103,7 +103,7 @@ function fit!(model, config, pos_pairs)
 
     n_examples = size(triplets)[1]
 
-    print("fitting with $num_examples examples\n")
+    print("fitting with $n_examples examples\n")
 
     ΣL = 0.0 # summed loss
     λ = config.λ # regularization
@@ -146,7 +146,7 @@ function fit!(model, config, pos_pairs)
         ΣL += L
     end
     
-    mean_loss = summed_loss / num_examples
+    mean_loss = ΣL / n_examples
     return mean_loss
 end
 
