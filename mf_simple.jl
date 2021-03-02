@@ -21,8 +21,8 @@ include("./data.jl")
 
 Random.seed!(123) # Setting the seed
 
-train = load("ml-100k/u1.base")
-test = load("ml-100k/u1.test")
+train, test, test_negatives = load("ml-100k/u.data")
+#test = load("ml-100k/u1.test")
 
 # init a random user embeddings and item embeddings. normal var w/ mean 0 and stdev by param
 # vector that is # user x embedding dimensions
@@ -87,7 +87,7 @@ end
 predict_one(model, 1, 2)
 
 function predict(model, users, items)
-    num_examples = length(pairs[1])
+    num_examples = length(users)
     predictions = zeros(num_examples)
     for i = 1:num_examples
         u_index = users[i]
@@ -131,7 +131,7 @@ function fit(model, config, pos_pairs)
     triplets = triplets[shuffle(1:end), :]
 
     # Iterate over all examples and perform one SGD step.
-    num_examples = length(triplets)
+    num_examples = size(triplets)[1]
 
     summed_loss = 0.0
 
@@ -169,6 +169,7 @@ function fit(model, config, pos_pairs)
     end
     
     mean_loss = summed_loss / num_examples
+    return mean_loss
 end
 
 # evaluate is in a different repo, here:
@@ -176,9 +177,9 @@ end
 function evaluate(model, test_ratings, test_negatives, k)
     hits = []
     ndcgs = []
-    for i in 1:length(test_ratings)
-        triplet = test_ratings[i]
-        negatives = test_negatives[i]
+    for i in 1:size(test_ratings)[1]
+        triplet = test_ratings[i, :]
+        negatives = test_negatives[i, :]
         hit, ndcg = eval_one_rating(model, triplet, negatives, k)
         print(hit, ndcg)
         append!(hits, hit)
@@ -202,11 +203,11 @@ function eval_one_rating(model, triplet, negatives, k)
 
     for i=1:length(items)
         item = items[i]
-        d[item] = predictions[i]
+        d[item] = preds[i]
     end
-    pop!(items)
+    #pop!(items)
 
-    ranked_k = sort(collect(zip(values(d),keys(d))))[1:k]
+    ranked_k = sort(collect(zip(values(d),keys(d))), rev=true)[1:k]
 
     hr_at_k = get_hit_ratio(ranked_k, target)
     ndcg_at_ak = get_ndcg(ranked_k, target)
@@ -214,7 +215,8 @@ function eval_one_rating(model, triplet, negatives, k)
 end
 
 function get_hit_ratio(ranked, target)
-    for item in ranked
+    for tuple in ranked
+        item = tuple[2]
         if item == target
             return 1
         end
@@ -224,7 +226,8 @@ end
 
 function get_ndcg(ranked, target)
     for i=1:length(ranked)
-        item = ranked[i]
+        tuple = ranked[i]
+        item = tuple[2]
         if item == target
             return log(2) / log(i+2)
         end
@@ -232,5 +235,13 @@ function get_ndcg(ranked, target)
     return 0
 end
 
+using Printf
 
-fit(model, config, train[train.hit .== true, ["user", "item"]])
+for i=1:50
+    print("=== epoch $i\n")
+    mean_loss = fit(model, config, train[train.hit .== true, ["user", "item"]])
+    hits, ndcgs = evaluate(model, convert(Array{Int64}, test), convert(Array{Int64}, test_negatives), 10);
+    mean_hits = mean(hits)
+    mean_ndcg = mean(ndcgs)
+    print("mean train loss: $mean_loss | mean hit rate: $mean_hits | mean ndcg: $mean_ndcg\n")
+end
