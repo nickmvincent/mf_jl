@@ -1,6 +1,6 @@
 #=
 Adapted from:
-From: https://github.com/google-research/google-research/blob/master/dot_vs_learned_similarity/mf_simple.py
+https://github.com/google-research/google-research/blob/master/dot_vs_learned_similarity/mf_simple.py
 """
 =#
 
@@ -73,7 +73,6 @@ function convert_implicit_triplets(model::MfModel, pairs::Array{Int}, num_neg::I
         user = pairs[pos_index, 1]
         item = pairs[pos_index, 2]
 
-        #append!(matrix, [user, item, 1])
         matrix[index, :] = [user, item, 1]
         index += 1
 
@@ -93,28 +92,29 @@ end
 
 function fit!(model::MfModel, config::Config, pos_pairs::Array{Int})
     triplets = convert_implicit_triplets(model, pos_pairs, config.num_neg)
-    triplets = triplets[shuffle(1:end), :]
+    shuffled = triplets[shuffle(1:end), :]
 
-    n_examples = size(triplets)[1]
+    n_examples = size(shuffled)[1]
 
     #print("fitting with $n_examples examples\n")
 
     ΣL = 0.0 # summed loss
     Σp = 0.0 # summed prediction scores. for debugging.
+    grads = []
+    mean_u = 0.0
+    mean_i = 0.0
+
     λ = config.λ # regularization
     η = config.η # learning rate
 
-    # Iterate over all examples and perform SGD
-    print(triplets[1:3, :], "\n")
+    # SGD
     for i = 1:n_examples
+        user, item, y = shuffled[i, :]
         
-        user, item, y = triplets[i, :]
-        
-        u_e = model.u_e[user, :]
-        i_e = model.i_e[item, :]
-        u_b = model.u_b[user]
-        i_b = model.i_b[item]
-        b = model.b
+        # snapshot these; subsetting a row appears to make a copy)
+        # but here we're using `copy` to be specific
+        u_e = copy(model.u_e[user, :])
+        i_e = copy(model.i_e[item, :])
 
         score = predict_one(model, user, item)
 
@@ -128,21 +128,40 @@ function fit!(model::MfModel, config::Config, pos_pairs::Array{Int})
         else
             exp_pred = exp(score)
             σ = exp_pred / (1.0 + exp_pred)
-            L = log(1.0 + exp_pred) - y * score
+            L = -y*score + log(1.0 + exp_pred)
         end
         ∂L = σ - y
+        append!(grads, ∂L)
+        # if user == 1 & item < 5
+        #     round4 = x-> round(x, digits=4)
+        #     rscore, rσ, ry, r∂L = map(round4, [score, σ, y, ∂L])
+        #     print("u $user, i $item, score $rscore, σ $rσ, y $ry, ∂L $r∂L\n")
+        #     append!(grads, ∂L)
+        # end
 
         model.u_e[user, :] -= η * (∂L * i_e + λ * u_e) #eq 11
         model.i_e[item, :] -= η * (∂L * u_e + λ * i_e) #eq 12
         
-        model.u_b[user] -= η * (∂L + λ * u_b) #eq 9
-        model.i_b[item] -= η * (∂L + λ * i_b) #eq 10
-        model.b -= η * (∂L + (λ * b))
+        model.u_b[user] -= η * (∂L + λ * model.u_b[user]) #eq 9
+        model.i_b[item] -= η * (∂L + λ * model.i_b[item]) #eq 10
+        model.b -= η * (∂L + λ * model.b)
 
+        mean_u += mean(abs.(model.u_e[user, :])) 
+        mean_i += mean(abs.(model.i_e[item, :]))
         ΣL += L
         Σp += score
     end
-    print(model.b, "\n")
+    # print(model.u_e[1:3, 1:3], "\n")
+    # print(model.i_e[1:3, 1:3], "\n")
+
+    # print(model.u_b[1:3, :], "\n")
+    # print(model.i_b[1:3, :], "\n")
+    # print(model.b, "\n")
+    print("n_examples ", n_examples, "\n")
+    print("mean grad ", round(mean(grads), digits=5), "\n|")
+    print("mean abs grad ", round(mean(abs.(grads)), digits=5), "\n|")
+    print("mean u_e i_e ", round(mean_u / n_examples, digits=5), " ", round(mean_i / n_examples, digits=5), "\n")
+
     mean_loss = ΣL / n_examples
     return mean_loss, Σp / n_examples
 end
@@ -176,6 +195,7 @@ function eval_one_rating(model::MfModel, triplet::Array{Int}, negatives::Array{I
         item = items[i]
         d[item] = preds[i]
     end
+    pop!(items)
 
     topk = sort(collect(zip(values(d),keys(d))), rev=true)[1:k]
 
@@ -196,7 +216,7 @@ end
 function main(;
     epochs=20, embedding_dim=16, stdev=0.1,
     frac=1.0, strike_size=0, strike_genre="",
-    learning_rate=0.001, regularization = 0.005
+    learning_rate=0.002, regularization = 0.005
 )
     #"ml-100k/u.data"
     filename = "ml-1m/ratings.dat"
@@ -219,7 +239,7 @@ function main(;
 
     # embedding_dim - 1 is used because the user and item biases are one of the dimensions
     config = Config(
-        epochs, embedding_dim-1,
+        epochs, embedding_dim - 1,
         λ, num_neg, 
         η, stdev
     )
@@ -268,7 +288,7 @@ function main(;
         s3 = round(mean_loss, digits=4)
         s4 = round(mean_pred, digits=4)
         s5 = round(time_elapsed, digits=2)
-        print("$epoch:\t HR: $s1, NDCG: $s2, TrainLoss: $s3, TrainPred: $s4, Time: $s5\n")
+        print("$epoch:\t HR: $s1, NDCG: $s2, TrainL: $s3, TrainP: $s4, Time: $s5\n")
         for genre in all_genres
             matches = items[items[:, genre], "item"]
             mask = [x in matches for x in test_hits.item]
@@ -288,7 +308,10 @@ function main(;
     return results, results[end, cols]
 end
 
-res, nice = main(epochs=30, learning_rate=0.002)
+res, nice = main(
+    epochs=50, learning_rate=0.002, regularization=0.005,
+    frac=1.0
+)
 CSV.write("res.csv", res)
 
 # all = []
