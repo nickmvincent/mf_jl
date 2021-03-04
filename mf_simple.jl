@@ -32,6 +32,9 @@ function predict_one(m::MfModel, user::Int, item::Int)
     """
     take a model, user index, and item index, and predict a score
     """
+    if user == -1 || item == -1
+        return 0
+    end
     return m.b + m.u_b[user] + m.i_b[item] + dot(
         m.u_e[user], m.i_e[item]
     )
