@@ -58,8 +58,6 @@ function load(
             df = df[mask, :]
 
         end
-
-
     end
 
     # renumber users and items so they are continuous indices
@@ -91,9 +89,6 @@ function load(
         end
     end
     item_df[:, "item"] = map(get, item_df.orig_item)
-
-
-
 
     num_items = length(unique(df.item))
     num_users = length(unique(df.user))

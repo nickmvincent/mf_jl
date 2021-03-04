@@ -9,7 +9,7 @@ using Random, Distributions, LinearAlgebra, CSV, DataFrames, Printf, Profile
 include("./data.jl") # load, prep, and split movielens data
 include("./eval.jl") # evaluate recsys
 
-Random.seed!(123) # Setting the seed
+#Random.seed!(123) # Setting the seed
 
 struct Config
     epochs::Int # number of epochs to train for
@@ -54,30 +54,31 @@ function predict(model::MfModel, users::Array{Int}, items::Array{Int})
     return preds
 end
 
-
-# 
-function convert_implicit_triplets(model::MfModel, pos_pairs::Array{Int}, num_neg::Int)
+function convert_implicit_triplets(model::MfModel, pairs::Array{Int}, num_neg::Int)
     """
     convert positive pairs to binary (hit/no hit)
     following the NCF paper, 
     """
     # positive pairs (user, item), and number of num_neg (user didn't hit item) to randomly sample
     # triplets are user, item, hit/no hit
-    num_items = size(model.i_e)[1]
-    num_pos = size(pos_pairs)[1]
-    matrix = zeros(num_pos * (1+num_neg), 3)
+    n_items = size(model.i_e)[1]
+    n_pairs = size(pairs)[1]
+    matrix = zeros(n_pairs * (1+num_neg), 3)
     index = 1
 
-    for pos_index = 1:num_pos
-        user = pos_pairs[pos_index, 1]
-        item = pos_pairs[pos_index, 2]
+    for pos_index = 1:n_pairs
+        user = pairs[pos_index, 1]
+        item = pairs[pos_index, 2]
 
         #append!(matrix, [user, item, 1])
         matrix[index, :] = [user, item, 1]
         index += 1
 
-        for a = 1:num_neg
-            random_item = rand(1:num_items)
+        # as in Rendle et al., we just sample from ALL KNOWN items
+        # this means we could include a negative twice, or include a 
+        # negative that's actually a positive.
+        for a = 1:num_neg # a is unused
+            random_item = rand(1:n_items)
             
             matrix[index, :] = [user, random_item, 0]
             index += 1
@@ -93,14 +94,17 @@ function fit!(model::MfModel, config::Config, pos_pairs::Array{Int})
 
     n_examples = size(triplets)[1]
 
-    print("fitting with $n_examples examples\n")
+    #print("fitting with $n_examples examples\n")
 
     ΣL = 0.0 # summed loss
+    Σp = 0.0 # summed prediction scores. for debugging.
     λ = config.λ # regularization
     η = config.η # learning rate
 
-    # Iterate over all examples and perform one SGD step.
+    # Iterate over all examples and perform SGD
+    print(triplets[1:3, :], "\n")
     for i = 1:n_examples
+        
         user, item, y = triplets[i, :]
         
         u_e = model.u_e[user, :]
@@ -111,8 +115,10 @@ function fit!(model::MfModel, config::Config, pos_pairs::Array{Int})
 
         score = predict_one(model, user, item)
 
+        # note that each branch does the same thing
+        # (compute sigmoid + loss from eq 8)
+        # just following the simplification from Rendle et al.'s code
         if score > 0
-            # sigmoid
             denom = 1.0 + exp(-score)
             σ = 1.0 / denom
             L = log(denom) + (1.0 - y) * score
@@ -121,24 +127,60 @@ function fit!(model::MfModel, config::Config, pos_pairs::Array{Int})
             σ = exp_pred / (1.0 + exp_pred)
             L = log(1.0 + exp_pred) - y * score
         end
-        #loss = -1 * (hit * log(pred) + (1-hit)*log(1-pred))
-
         ∂L = σ - y
-        
-        model.u_b[user] -= η * (∂L + (λ * u_b)) #eq 9
-        model.i_b[item] -= η * (∂L + (λ * i_b)) #eq 10
 
-        model.u_e[user, :] -= η * ((∂L * i_e) + (λ * u_e)) #eq 1 
-        model.i_e[item, :] -= η * ((∂L * u_e) + (λ * i_e)) #eq 12
+        model.u_e[user, :] -= η * (∂L * i_e + λ * u_e) #eq 11
+        model.i_e[item, :] -= η * (∂L * u_e + λ * i_e) #eq 12
         
+        model.u_b[user] -= η * (∂L + λ * u_b) #eq 9
+        model.i_b[item] -= η * (∂L + λ * i_b) #eq 10
         model.b -= η * (∂L + (λ * b))
 
         ΣL += L
+        Σp += score
     end
-    
+    print(model.b, "\n")
     mean_loss = ΣL / n_examples
-    return mean_loss
+    return mean_loss, Σp / n_examples
 end
+
+# evaluate is from a different repo, here:
+# https://github.com/hexiangnan/neural_collaborative_filtering/blob/master/evaluate.py
+function evaluate(model::MfModel, test_ratings::Array{Int}, test_negatives::Array{Int}, k::Int)
+    hits = []
+    ndcgs = []
+    for i in 1:size(test_ratings)[1]
+        triplet = test_ratings[i, :]
+        negatives = test_negatives[i, :]
+        hit, ndcg = eval_one_rating(model, triplet, negatives, k)
+        append!(hits, hit)
+        append!(ndcgs, ndcg)
+    end
+    return hits, ndcgs
+end
+
+function eval_one_rating(model::MfModel, triplet::Array{Int}, negatives::Array{Int}, k::Int)
+    items = negatives
+    user, target, hit = triplet
+
+    append!(items, target)
+    
+    d = Dict() # item to score dict
+    users = fill(user, length(items))
+    preds = predict(model, users, items)
+
+    for i=1:length(items)
+        item = items[i]
+        d[item] = preds[i]
+    end
+
+    topk = sort(collect(zip(values(d),keys(d))), rev=true)[1:k]
+
+    hr_at_k = get_hr(topk, target)
+    ndcg_at_ak = get_ndcg(topk, target)
+    return [hr_at_k, ndcg_at_ak]
+end
+
 
 
 
@@ -148,30 +190,33 @@ end
 
 
 
-function main(; epochs=10, strike_size=0, strike_genre="")
+function main(;
+    epochs=20, embedding_dim=16, stdev=0.1,
+    frac=1.0, strike_size=0, strike_genre="",
+    learning_rate=0.001, regularization = 0.005
+)
     #"ml-100k/u.data"
     filename = "ml-1m/ratings.dat"
     item_filename = "ml-1m/movies.dat"
     delim = "::"
     strat = "leave_out_last"
-    frac = 0.20
     train, test_hits, test_negatives, num_users, num_items, items, all_genres = load(
         filename, delim=delim, strat=strat, frac=frac, item_filename=item_filename,
         strike_size=strike_size, strike_genre=strike_genre
-        
     )
 
     n_train = size(train)[1]
+    n_test = size(test_hits)[1]
+    print("n_users: $num_users, n_items: $num_items, n_train: $n_train, num_test: $n_test \n")
 
     # config for training the recsys
-    embedding_dim = 8
-    λ = 0.005
-    num_neg = 4
-    η = 0.01#0.002
-    stdev = 0.1
+    λ = regularization
+    num_neg = 8
+    η = learning_rate
 
+    # embedding_dim - 1 is used because the user and item biases are one of the dimensions
     config = Config(
-        epochs, embedding_dim,
+        epochs, embedding_dim-1,
         λ, num_neg, 
         η, stdev
     )
@@ -192,24 +237,35 @@ function main(; epochs=10, strike_size=0, strike_genre="")
     
     k = 10
 
-    rand_hits, rand_ndcgs = evaluate(model, test_hits_arr, test_neg_arr, k)
-    rand_hr = mean(rand_hits)
-    rand_ndcg = mean(rand_ndcgs)
-    print("HR: $rand_hr | NDCG: $rand_ndcg\n")
+    # rand_hits, rand_ndcgs = evaluate(model, test_hits_arr, test_neg_arr, k)
+    # rand_hr = mean(rand_hits)
+    # rand_ndcg = mean(rand_ndcgs)
+    # print("HR: $rand_hr | NDCG: $rand_ndcg\n")
 
     records = []
     for epoch=1:config.epochs
         record = Dict{Any,Any}("epoch"=>epoch, "n_train"=>n_train, "strike_size"=>strike_size, "strike_genre"=>strike_genre)
         record["epoch"] = epoch
-        print("=== epoch $epoch\n")
-        mean_loss = fit!(model, config, train_arr)
+        # == Fit ==
+        t_start_fit = time()
+        mean_loss, mean_pred = fit!(model, config, train_arr)
+        time_elapsed = time() - t_start_fit
+        record["time_elapsed"] = time_elapsed
+        # == Evaluate ==
         hits, ndcgs = evaluate(model, test_hits_arr, test_neg_arr, k)
         hr = mean(hits)
         ndcg = mean(ndcgs)
         record["hr"] = hr
         record["ndcg"] = ndcg
         record["loss"] = mean_loss
-        print("mean train loss: $mean_loss | HR: $hr | NDCG: $ndcg\n")
+
+        
+        s1 = round(hr, digits=4)
+        s2 = round(ndcg, digits=4)
+        s3 = round(mean_loss, digits=4)
+        s4 = round(mean_pred, digits=4)
+        s5 = round(time_elapsed, digits=2)
+        print("$epoch:\t HR: $s1, NDCG: $s2, TrainLoss: $s3, TrainPred: $s4, Time: $s5\n")
         for genre in all_genres
             matches = items[items[:, genre], "item"]
             mask = [x in matches for x in test_hits.item]
@@ -217,9 +273,8 @@ function main(; epochs=10, strike_size=0, strike_genre="")
             genre_ndcg = round(mean(ndcgs[mask]), digits=2)
             record["$genre hr"] = genre_hr
             record["$genre ndcg"] = genre_ndcg
-            print("$genre $genre_hr|")
+            #print("$genre $genre_hr|")
         end 
-        print("\n")
         push!(records, record)
     end
     results = DataFrame(records[1])
@@ -230,23 +285,19 @@ function main(; epochs=10, strike_size=0, strike_genre="")
     return results, results[end, cols]
 end
 
-all = []
-nice_dfs = []
-for size in [0, 0.1, 0.2, 0.3, 0.4, 0.5]
-    res, nice = main(epochs=10, strike_size=size)
-    res_comedy, nice_comedy = main(epochs=10, strike_size=size, strike_genre="Comedy")
-    push!(all, res)
-    push!(all, res_comedy)
+res, nice = main(epochs=30, learning_rate=0.002)
+CSV.write("res.csv", res)
 
-    push!(nice_dfs, nice)
-    push!(nice_dfs, nice_comedy)
-end
-nice_df = DataFrame(vcat(nice_dfs...))
-# res1, nice1 = main(epochs=5)
-# res2, nice2 = main(epochs=5, strike_size=0.5)
-# res3, nice3 =  main(epochs=5, strike_size=0.5, strike_genre="Comedy")
-# nice = DataFrame(vcat(nice1,nice2,nice3))
-# results = main()
-# results
+# all = []
+# nice_dfs = []
+# for size in [0, 0.1, 0.2, 0.3, 0.4, 0.5]
+#     res, nice = main(epochs=10, strike_size=size)
+#     res_comedy, nice_comedy = main(epochs=10, strike_size=size, strike_genre="Comedy")
+#     push!(all, res)
+#     push!(all, res_comedy)
 
-#Profile.print()
+#     push!(nice_dfs, nice)
+#     push!(nice_dfs, nice_comedy)
+# end
+# nice_df = DataFrame(vcat(nice_dfs...))
+
