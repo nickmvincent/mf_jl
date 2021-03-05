@@ -1,7 +1,6 @@
 #=
 Adapted from:
 https://github.com/google-research/google-research/blob/master/dot_vs_learned_similarity/mf_simple.py
-"""
 =#
 
 using Random, Distributions, LinearAlgebra, CSV, DataFrames, Printf
@@ -21,32 +20,31 @@ struct Config
 end
 
 mutable struct MfModel
-    u_emb::Array{Float64}
-    i_emb::Array{Float64}
-    u_b::Array{Float64}
-    i_b::Array{Float64}
-    b::Float64
+    u_emb::Array{Float64} # user embeddings
+    i_emb::Array{Float64} # item embeddings
+    u_b::Array{Float64} # user biases
+    i_b::Array{Float64} # item biases
+    b::Float64 # global bias
 end
 
+"""
+take a model, user index, and item index, and predict a score
+before calling, check for -1 (unseen) values
+"""
 function predict_one(m::MfModel, user::Int, item::Int)
-    """
-    take a model, user index, and item index, and predict a score
-    """
-    # if user == -1 || item == -1
-    #     return 0
-    # end
+
     return m.b + m.u_b[user] + m.i_b[item] + dot(
         m.u_emb[user, :], m.i_emb[item, :]
     )
 end
 
-# predict_one(model, 1, 2)
-
+"""
+Make a prediction for each user x item.
+    users - array of users. Must be same length as items.
+    items - array of items.
+"""
 function predict(model::MfModel, users::Array{Int}, items::Array{Int})
-    """
-    Make a prediction for each user x item.
-        users - an array of users. Must be same lenght as items.
-    """
+    
     n_examples = length(users)
     preds = zeros(n_examples)
     for i = 1:n_examples
@@ -61,13 +59,14 @@ function predict(model::MfModel, users::Array{Int}, items::Array{Int})
     return preds
 end
 
+"""
+convert positive pairs to binary (hit/no hit)
+following the NCF paper
+pairs is: positive pairs (user, item), and number of n_negatives (user didn't hit item) to randomly sample
+triplets are user, item, hit/no hit
+"""
 function convert_implicit_triplets(n_items::Int, pairs::Array{Int}, n_negatives::Int)
-    """
-    convert positive pairs to binary (hit/no hit)
-    following the NCF paper
-    pairs is: positive pairs (user, item), and number of n_negatives (user didn't hit item) to randomly sample
-    triplets are user, item, hit/no hit
-    """
+   
     n_pairs = size(pairs)[1]
     matrix = zeros(n_pairs * (1+n_negatives), 3)
     index = 1
@@ -92,10 +91,15 @@ function convert_implicit_triplets(n_items::Int, pairs::Array{Int}, n_negatives:
     return convert(Array{Int}, matrix)
 end
 
+"""
+p - the prediction score
+y - label (hit or no hit)
+
+# using simplification from Rendle et al.'s code
+# whether p >0 or not, this computes the same sigmoid and loss value from eq 8
+"""
 function compute_loss(p, y)
-    # note that each branch does the same thing
-    # (compute sigmoid + loss from eq 8)
-    # just following the simplification from Rendle et al.'s code
+    
     if p > 0
         denom = 1.0 + exp(-p)
         σ = 1.0 / denom
@@ -108,36 +112,35 @@ function compute_loss(p, y)
     return σ, L
 end
 
+"""
+fit the model with SGD
+"""
 function fit!(model::MfModel, config::Config, train_arr::Array{Int})
-    #debug = true
     n_items = size(model.i_emb)[1]
+    # format the training data and shuffle (to avoid cycles)
     triplets = convert_implicit_triplets(n_items, train_arr, config.n_negatives)
     shuffled = triplets[shuffle(1:end), :]
-
-    n_examples = size(shuffled)[1]
+    
 
     ΣL = 0.0 # summed loss
-    Σscore = 0.0 # summed prediction scores. for debugging.
-    grads = []
 
-    λ = config.λ # regularization
-    η = config.η # learning rate
+    λ = config.λ # for reference: regularization
+    η = config.η # for reference: learning rate
 
-    # SGD
+    # SGD loop
+    # TODO minibatch + parallelize?
+    n_examples = size(shuffled)[1]
     for i = 1:n_examples
         user, item, y = shuffled[i, :]
         
-        # snapshot these; subsetting a row appears to make a copy
-        # but here we're using `copy` to be specific
         u_emb = copy(model.u_emb[user, :])
         i_emb = copy(model.i_emb[item, :])
 
         p = predict_one(model, user, item)
-
         σ, L = compute_loss(p, y)
-        
         ∂L = σ - y
-        append!(grads, ∂L)
+
+        # Update weights
 
         model.u_emb[user, :] -= η * (∂L * i_emb + λ * u_emb) #eq 11
         model.i_emb[item, :] -= η * (∂L * u_emb + λ * i_emb) #eq 12
@@ -146,27 +149,18 @@ function fit!(model::MfModel, config::Config, train_arr::Array{Int})
         model.i_b[item] -= η * (∂L + λ * model.i_b[item]) #eq 10
         model.b -= η * (∂L + λ * model.b)
 
+        # just keeping track of loss for debugging
         ΣL += L
-        Σscore += p
     end
-    # if debug
-    #     print("n_examples ", n_examples, "\n")
-    #     print(
-    #         "grad ", round(mean(grads), digits=5), " | ", "abs grad ",round(mean(abs.(grads)), digits=5),
-    #         " | ", "abs u_emb ", round(mean(abs.(model.u_emb)), digits=5), " | abs i_emb ", round(mean(abs.(model.i_emb)), digits=5), 
-    #         " | abs u_b ", round(mean(abs.(model.u_b)), digits=5), " | abs i_b ", round(mean(abs.(model.i_b)), digits=5),
-    #         " | abs b ", round(mean(abs.(model.b)), digits=5), 
-    #         " | u_emb ", round(mean(model.u_emb), digits=5), " | i_emb ", round(mean(model.i_emb), digits=5),
-    #         "\n")
-    #     print( "\n", )
-    # end
 
     mean_loss = ΣL / n_examples
-    return mean_loss, Σscore / n_examples
+    return mean_loss
 end
 
-# evaluate is from a different repo:
-# https://github.com/hexiangnan/neural_collaborative_filtering/blob/master/evaluate.py
+"""
+evalute the recommender model using "leave last out" (holdout LAST hit item + 100 random negatives)
+based on this code/paper: https://github.com/hexiangnan/neural_collaborative_filtering/blob/master/evaluate.py
+"""
 function evaluate(model::MfModel, test_ratings::Array{Int}, test_negatives::Array{Int}, k::Int)
     hits = []
     ndcgs = []
@@ -204,15 +198,15 @@ function eval_one_rating(model::MfModel, triplet::Array{Int}, negatives::Array{I
 end
 
 # for REPL
-epochs = 20
-embedding_dim = 16
-stdev = 0.1
-frac = 1.0
-strike_size = 0
-strike_genre = ""
-learning_rate = 0.01
-regularization = 0.005
-n_negatives = 8
+# epochs = 20
+# embedding_dim = 16
+# stdev = 0.1
+# frac = 1.0
+# strike_size = 0
+# strike_genre = ""
+# learning_rate = 0.01
+# regularization = 0.005
+# n_negatives = 8
 
 function main(;
     epochs=20, embedding_dim=16, stdev=0.1,
@@ -274,7 +268,7 @@ function main(;
         #print(train_arr[1:10, :], "\n|")
         # == Fit ==
         t_start_fit = time()
-        mean_loss, mean_pred = fit!(model, config, train_arr)
+        mean_loss = fit!(model, config, train_arr)
         time_elapsed = time() - t_start_fit
         record["time_elapsed"] = time_elapsed
         # == Evaluate ==
@@ -286,8 +280,8 @@ function main(;
         record["loss"] = mean_loss
 
         round4 = x -> round(x, digits=4)
-        s1, s2, s3, s4, s5 = map(round4, [hr, ndcg, mean_loss, mean_pred, time_elapsed])
-        print("$epoch:\t HR: $s1, NDCG: $s2, TrainL: $s3, TrainP: $s4, Time: $s5\n")
+        s1, s2, s3, s4 = map(round4, [hr, ndcg, mean_loss, time_elapsed])
+        print("$epoch:\t HR: $s1, NDCG: $s2, TrainL: $s3, Time: $s4\n")
         for genre in all_genres
             matches = items[items[:, genre], "item"]
             mask = [x in matches for x in test_hits.item]
@@ -295,7 +289,7 @@ function main(;
             genre_ndcg = round(mean(ndcgs[mask]), digits=2)
             record["$genre hr"] = genre_hr
             record["$genre ndcg"] = genre_ndcg
-            #print("$genre $genre_hr|")
+            print("$genre $genre_hr|")
         end 
         push!(records, record)
     end
@@ -304,14 +298,21 @@ function main(;
         push!(results, record)
     end
     cols = ["strike_size", "n_train", "strike_genre", "hr", "Action hr", "Comedy hr"]
+    write(results)
     return results, results[end, cols]
 end
 
-res, nice = main(
-    epochs=256, learning_rate=0.002, regularization=0.005,
-    frac=1.0, n_negatives=8
-)
-CSV.write("res.csv", res)
+# res, nice = main(
+#     epochs=5, learning_rate=0.01, regularization=0.005,
+#     frac=0.05, n_negatives=8
+# )
+
+function write(nice)
+
+    ts = now()
+    CSV.write("$ts.csv", res)
+end
+
 
 # all = []
 # nice_dfs = []
