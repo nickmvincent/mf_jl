@@ -4,7 +4,7 @@ https://github.com/google-research/google-research/blob/master/dot_vs_learned_si
 """
 =#
 
-using Random, Distributions, LinearAlgebra, CSV, DataFrames, Printf, Profile
+using Random, Distributions, LinearAlgebra, CSV, DataFrames, Printf
 
 include("./data.jl") # load, prep, and split movielens data
 include("./eval.jl") # evaluate recsys
@@ -15,14 +15,14 @@ struct Config
     epochs::Int # number of epochs to train for
     embedding_dim::Int # embedding dim
     λ::Float64 # regularization
-    num_neg::Int # number of of negative samples per pos
+    n_negatives::Int # number of of negative samples per pos
     η::Float64 # learning rate
     stdev::Float64 # standard dev for init
 end
 
 mutable struct MfModel
-    u_e::Array{Float64}
-    i_e::Array{Float64}
+    u_emb::Array{Float64}
+    i_emb::Array{Float64}
     u_b::Array{Float64}
     i_b::Array{Float64}
     b::Float64
@@ -32,11 +32,11 @@ function predict_one(m::MfModel, user::Int, item::Int)
     """
     take a model, user index, and item index, and predict a score
     """
-    if user == -1 || item == -1
-        return 0
-    end
+    # if user == -1 || item == -1
+    #     return 0
+    # end
     return m.b + m.u_b[user] + m.i_b[item] + dot(
-        m.u_e[user], m.i_e[item]
+        m.u_emb[user, :], m.i_emb[item, :]
     )
 end
 
@@ -52,21 +52,24 @@ function predict(model::MfModel, users::Array{Int}, items::Array{Int})
     for i = 1:n_examples
         user = users[i]
         item = items[i]
-        preds[i] = predict_one(model, user, item)
+        if user == -1 || item == -1
+            preds[i] = 0
+        else
+            preds[i] = predict_one(model, user, item)
+        end
     end
     return preds
 end
 
-function convert_implicit_triplets(model::MfModel, pairs::Array{Int}, num_neg::Int)
+function convert_implicit_triplets(n_items::Int, pairs::Array{Int}, n_negatives::Int)
     """
     convert positive pairs to binary (hit/no hit)
-    following the NCF paper, 
+    following the NCF paper
+    pairs is: positive pairs (user, item), and number of n_negatives (user didn't hit item) to randomly sample
+    triplets are user, item, hit/no hit
     """
-    # positive pairs (user, item), and number of num_neg (user didn't hit item) to randomly sample
-    # triplets are user, item, hit/no hit
-    n_items = size(model.i_e)[1]
     n_pairs = size(pairs)[1]
-    matrix = zeros(n_pairs * (1+num_neg), 3)
+    matrix = zeros(n_pairs * (1+n_negatives), 3)
     index = 1
 
     for pos_index = 1:n_pairs
@@ -79,7 +82,7 @@ function convert_implicit_triplets(model::MfModel, pairs::Array{Int}, num_neg::I
         # as in Rendle et al., we just sample from ALL KNOWN items
         # this means we could include a negative twice, or include a 
         # negative that's actually a positive.
-        for a = 1:num_neg # a is unused
+        for a = 1:n_negatives # a is unused
             random_item = rand(1:n_items)
             
             matrix[index, :] = [user, random_item, 0]
@@ -89,20 +92,33 @@ function convert_implicit_triplets(model::MfModel, pairs::Array{Int}, num_neg::I
     return convert(Array{Int}, matrix)
 end
 
+function compute_loss(p, y)
+    # note that each branch does the same thing
+    # (compute sigmoid + loss from eq 8)
+    # just following the simplification from Rendle et al.'s code
+    if p > 0
+        denom = 1.0 + exp(-p)
+        σ = 1.0 / denom
+        L = log(denom) + (1.0 - y) * p
+    else
+        exp_pred = exp(p)
+        σ = exp_pred / (1.0 + exp_pred)
+        L = -y*p + log(1.0 + exp_pred)
+    end
+    return σ, L
+end
 
-function fit!(model::MfModel, config::Config, pos_pairs::Array{Int})
-    triplets = convert_implicit_triplets(model, pos_pairs, config.num_neg)
+function fit!(model::MfModel, config::Config, train_arr::Array{Int})
+    #debug = true
+    n_items = size(model.i_emb)[1]
+    triplets = convert_implicit_triplets(n_items, train_arr, config.n_negatives)
     shuffled = triplets[shuffle(1:end), :]
 
     n_examples = size(shuffled)[1]
 
-    #print("fitting with $n_examples examples\n")
-
     ΣL = 0.0 # summed loss
-    Σp = 0.0 # summed prediction scores. for debugging.
+    Σscore = 0.0 # summed prediction scores. for debugging.
     grads = []
-    mean_u = 0.0
-    mean_i = 0.0
 
     λ = config.λ # regularization
     η = config.η # learning rate
@@ -111,62 +127,45 @@ function fit!(model::MfModel, config::Config, pos_pairs::Array{Int})
     for i = 1:n_examples
         user, item, y = shuffled[i, :]
         
-        # snapshot these; subsetting a row appears to make a copy)
+        # snapshot these; subsetting a row appears to make a copy
         # but here we're using `copy` to be specific
-        u_e = copy(model.u_e[user, :])
-        i_e = copy(model.i_e[item, :])
+        u_emb = copy(model.u_emb[user, :])
+        i_emb = copy(model.i_emb[item, :])
 
-        score = predict_one(model, user, item)
+        p = predict_one(model, user, item)
 
-        # note that each branch does the same thing
-        # (compute sigmoid + loss from eq 8)
-        # just following the simplification from Rendle et al.'s code
-        if score > 0
-            denom = 1.0 + exp(-score)
-            σ = 1.0 / denom
-            L = log(denom) + (1.0 - y) * score
-        else
-            exp_pred = exp(score)
-            σ = exp_pred / (1.0 + exp_pred)
-            L = -y*score + log(1.0 + exp_pred)
-        end
+        σ, L = compute_loss(p, y)
+        
         ∂L = σ - y
         append!(grads, ∂L)
-        # if user == 1 & item < 5
-        #     round4 = x-> round(x, digits=4)
-        #     rscore, rσ, ry, r∂L = map(round4, [score, σ, y, ∂L])
-        #     print("u $user, i $item, score $rscore, σ $rσ, y $ry, ∂L $r∂L\n")
-        #     append!(grads, ∂L)
-        # end
 
-        model.u_e[user, :] -= η * (∂L * i_e + λ * u_e) #eq 11
-        model.i_e[item, :] -= η * (∂L * u_e + λ * i_e) #eq 12
+        model.u_emb[user, :] -= η * (∂L * i_emb + λ * u_emb) #eq 11
+        model.i_emb[item, :] -= η * (∂L * u_emb + λ * i_emb) #eq 12
         
         model.u_b[user] -= η * (∂L + λ * model.u_b[user]) #eq 9
         model.i_b[item] -= η * (∂L + λ * model.i_b[item]) #eq 10
         model.b -= η * (∂L + λ * model.b)
 
-        mean_u += mean(abs.(model.u_e[user, :])) 
-        mean_i += mean(abs.(model.i_e[item, :]))
         ΣL += L
-        Σp += score
+        Σscore += p
     end
-    # print(model.u_e[1:3, 1:3], "\n")
-    # print(model.i_e[1:3, 1:3], "\n")
-
-    # print(model.u_b[1:3, :], "\n")
-    # print(model.i_b[1:3, :], "\n")
-    # print(model.b, "\n")
-    print("n_examples ", n_examples, "\n")
-    print("mean grad ", round(mean(grads), digits=5), "\n|")
-    print("mean abs grad ", round(mean(abs.(grads)), digits=5), "\n|")
-    print("mean u_e i_e ", round(mean_u / n_examples, digits=5), " ", round(mean_i / n_examples, digits=5), "\n")
+    # if debug
+    #     print("n_examples ", n_examples, "\n")
+    #     print(
+    #         "grad ", round(mean(grads), digits=5), " | ", "abs grad ",round(mean(abs.(grads)), digits=5),
+    #         " | ", "abs u_emb ", round(mean(abs.(model.u_emb)), digits=5), " | abs i_emb ", round(mean(abs.(model.i_emb)), digits=5), 
+    #         " | abs u_b ", round(mean(abs.(model.u_b)), digits=5), " | abs i_b ", round(mean(abs.(model.i_b)), digits=5),
+    #         " | abs b ", round(mean(abs.(model.b)), digits=5), 
+    #         " | u_emb ", round(mean(model.u_emb), digits=5), " | i_emb ", round(mean(model.i_emb), digits=5),
+    #         "\n")
+    #     print( "\n", )
+    # end
 
     mean_loss = ΣL / n_examples
-    return mean_loss, Σp / n_examples
+    return mean_loss, Σscore / n_examples
 end
 
-# evaluate is from a different repo, here:
+# evaluate is from a different repo:
 # https://github.com/hexiangnan/neural_collaborative_filtering/blob/master/evaluate.py
 function evaluate(model::MfModel, test_ratings::Array{Int}, test_negatives::Array{Int}, k::Int)
     hits = []
@@ -204,54 +203,57 @@ function eval_one_rating(model::MfModel, triplet::Array{Int}, negatives::Array{I
     return [hr_at_k, ndcg_at_ak]
 end
 
-
-
-
-#test_ratings = [[1,1,1], [1,2,0], [2,1,0], [2,2,1]]
-#test_negatives =[[3], [3], [3], [3]]
-#evaluate(model, test_ratings, test_negatives, 1)
-
-
+# for REPL
+epochs = 20
+embedding_dim = 16
+stdev = 0.1
+frac = 1.0
+strike_size = 0
+strike_genre = ""
+learning_rate = 0.01
+regularization = 0.005
+n_negatives = 8
 
 function main(;
     epochs=20, embedding_dim=16, stdev=0.1,
     frac=1.0, strike_size=0, strike_genre="",
-    learning_rate=0.002, regularization = 0.005
+    learning_rate=0.002, regularization=0.005, n_negatives = 8
 )
     #"ml-100k/u.data"
     filename = "ml-1m/ratings.dat"
     item_filename = "ml-1m/movies.dat"
     delim = "::"
     strat = "leave_out_last"
-    train, test_hits, test_negatives, num_users, num_items, items, all_genres = load(
+    train, test_hits, test_negatives, n_users, n_items, items, all_genres = load(
         filename, delim=delim, strat=strat, frac=frac, item_filename=item_filename,
         strike_size=strike_size, strike_genre=strike_genre
     )
 
     n_train = size(train)[1]
     n_test = size(test_hits)[1]
-    print("n_users: $num_users, n_items: $num_items, n_train: $n_train, num_test: $n_test \n")
+    print("n_users: $n_users, n_items: $n_items, n_train: $n_train, num_test: $n_test \n")
 
     # config for training the recsys
     λ = regularization
-    num_neg = 8
+    
     η = learning_rate
 
     # embedding_dim - 1 is used because the user and item biases are one of the dimensions
     config = Config(
         epochs, embedding_dim - 1,
-        λ, num_neg, 
+        λ, n_negatives, 
         η, stdev
     )
+    print(config, "\n")
 
     # init the model. Embeddings are drawn from normal, biases start at zero.
     dist = Normal(0, config.stdev)
-    u_e = rand(dist, num_users, config.embedding_dim)
-    i_e = rand(dist, num_items, config.embedding_dim)
-    u_b = zeros(num_users)
-    i_b = zeros(num_items)
+    u_emb = rand(dist, n_users, config.embedding_dim)
+    i_emb = rand(dist, n_items, config.embedding_dim)
+    u_b = zeros(n_users)
+    i_b = zeros(n_items)
     b = 0.0
-    model = MfModel(u_e, i_e, u_b, i_b, b)
+    model = MfModel(u_emb, i_emb, u_b, i_b, b)
 
     # convert data to Int arrays to make Julia compiler happer
     train_arr = convert(Array{Int},  train[:, ["user", "item"]])
@@ -260,15 +262,16 @@ function main(;
     
     k = 10
 
-    # rand_hits, rand_ndcgs = evaluate(model, test_hits_arr, test_neg_arr, k)
-    # rand_hr = mean(rand_hits)
-    # rand_ndcg = mean(rand_ndcgs)
-    # print("HR: $rand_hr | NDCG: $rand_ndcg\n")
+    rand_hits, rand_ndcgs = evaluate(model, test_hits_arr, test_neg_arr, k)
+    rand_hr = mean(rand_hits)
+    rand_ndcg = mean(rand_ndcgs)
+    print("HR: $rand_hr | NDCG: $rand_ndcg\n")
 
     records = []
     for epoch=1:config.epochs
         record = Dict{Any,Any}("epoch"=>epoch, "n_train"=>n_train, "strike_size"=>strike_size, "strike_genre"=>strike_genre)
         record["epoch"] = epoch
+        #print(train_arr[1:10, :], "\n|")
         # == Fit ==
         t_start_fit = time()
         mean_loss, mean_pred = fit!(model, config, train_arr)
@@ -282,12 +285,8 @@ function main(;
         record["ndcg"] = ndcg
         record["loss"] = mean_loss
 
-        
-        s1 = round(hr, digits=4)
-        s2 = round(ndcg, digits=4)
-        s3 = round(mean_loss, digits=4)
-        s4 = round(mean_pred, digits=4)
-        s5 = round(time_elapsed, digits=2)
+        round4 = x -> round(x, digits=4)
+        s1, s2, s3, s4, s5 = map(round4, [hr, ndcg, mean_loss, mean_pred, time_elapsed])
         print("$epoch:\t HR: $s1, NDCG: $s2, TrainL: $s3, TrainP: $s4, Time: $s5\n")
         for genre in all_genres
             matches = items[items[:, genre], "item"]
@@ -309,8 +308,8 @@ function main(;
 end
 
 res, nice = main(
-    epochs=50, learning_rate=0.002, regularization=0.005,
-    frac=1.0
+    epochs=256, learning_rate=0.002, regularization=0.005,
+    frac=1.0, n_negatives=8
 )
 CSV.write("res.csv", res)
 
