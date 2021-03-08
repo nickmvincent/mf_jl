@@ -7,9 +7,6 @@ using InteractiveUtils
 # ╔═╡ 4249a200-7dd5-11eb-0797-f915646bc3b7
 using Markdown, Distributions, PlutoUI
 
-# ╔═╡ 88fa2210-7e11-11eb-2a02-39213f33d8b9
-using Printf
-
 # ╔═╡ f06049de-7e14-11eb-2315-6f512f180152
 include("mf_simple.jl")
 
@@ -50,7 +47,7 @@ Take Care = 1, Care Package = 2, Scary Days 2 = 3, Trilogy = 4, Kiss Land = 5, A
 
 # ╔═╡ 84c47990-7e0f-11eb-22a7-33a465e12cad
 md"""
-The Training Data and Test Data, as a collection of numbers (left column = people, right column = albums).
+For this problem, we'll capture our "Training Data" and "Test Data" as a collection of numbers (left column = people, right column = albums).
 
 In other words, this matrix is a represention of the above data (that Al--aka Person 1--listened to Take Care--aka item 1--, Care Package--aka item 2--- etc.)
 
@@ -72,8 +69,6 @@ pairs = [
 
 # ╔═╡ f494c140-7e13-11eb-1fd4-55fc44f64643
 md"""
-We have "test pairs". We want our system to recommend Scary Days 2 (aka item 3) to Cam (aka Person 3) and After Hours (aka items 6) to Di (aka Person 4).
-
 Specifically, each row here tells the PERSON, the ITEM, and a 1 to indicate this is a "hit" (a successful recommendation).
 """
 
@@ -130,13 +125,23 @@ config = Config(
 
 # ╔═╡ 540386d0-7dd7-11eb-3d1b-a383f0235912
 md"""
+## Our "model", in numbers
 Our "model" has 5 components: a `global bias` (a single number), a set of `user biases` (represent how much each individual listens to music), `item biases` (represents how much each item gets listened to), `user embeddings`, and `item embeddings`. The embeddings are the real "meat" of the model: this is where capture the interaction between users and albums.
 
 The `biases` all start at 0. The user embeddings start as random numbers, but we'll update them as we go through the "learning" process.
 
+## Predicting if a particular person will like a particular album
 We can predict how likely a particular user will like a particular album in the following manner:
 
 We add the global bias, the user's bias, the item's bias, and combine (using the "dot product") the "embedding" for that user and item to produce a score. By producing scores for each possible items, we can give each user a ranked list of "here are the top items for you".
+
+As example with nicely rounded numbers: 
+
+if global bias was -1, and the user-specific bias value was -0.5, the item-specific bias value was 0.5, the user-specific two-dimensional embedding was [-1, 1] and the item-specific embedding was [1, -0.5], the score for that user-item combination would be
+
+-1 + -0.5 + 0.5 + -1*1 + 1 * -0.5 = -1.5
+
+If this score is high relative to to other scores, we'd recommend this album to this person. If it is relatively low, we won't!
 """
 
 # ╔═╡ 5b60e710-7dd7-11eb-0f4f-456719976680
@@ -148,9 +153,24 @@ u_emb, i_emb, u_b, i_b, b = rand(dist, n_users, config.embedding_dim), rand(dist
 # ╔═╡ 73ba9360-7dd7-11eb-1388-63c1b8ad7064
 model = MfModel(u_emb, i_emb, u_b, i_b, b);
 
+# ╔═╡ 369530b6-7fc7-11eb-350c-dfd7d2d2ac3b
+## Predicting if a particular person will like a particular album
+We can predict how likely a particular user will like a particular album in the following manner:
+
+We add the global bias, the user's bias, the item's bias, and combine (using the "dot product") the "embedding" for that user and item to produce a score. By producing scores for each possible items, we can give each user a ranked list of "here are the top items for you".
+
+As example with nicely rounded numbers: 
+
+if global bias was -1, and the user-specific bias value was -0.5, the item-specific bias value was 0.5, the user-specific two-dimensional embedding was [-1, 1] and the item-specific embedding was [1, -0.5], the score for that user-item combination would be
+
+-1 + -0.5 + 0.5 + -1*1 + 1 * -0.5 = -1.5
+
+If this score is high relative to to other scores, we'd recommend this album to this person. If it is relatively low, we won't!
+"""
+
 # ╔═╡ cdecd942-7e10-11eb-37cd-0de10a09d01f
 md"""
-First, let's see how our totall random model does. For each user, there's 4 possible options to recommend, so we'd expect to get it right about 1/4 of the time.
+First, let's see how our fresh model does. It hasn't "looked at" our Training Dataset yet, so we'd expect that it won't do too well. More specifically, for each user, there's 4 possible options to recommend, so we'd expect to get it right about 1/4 of the time.
 """
 
 # ╔═╡ ac781c20-7dd9-11eb-0099-4315647a7e14
@@ -159,6 +179,17 @@ k = 1
 # ╔═╡ 10af7490-7e11-11eb-1b47-156e177197c2
 md"""
 Produce the ranked lists!
+"""
+
+# ╔═╡ 205aba9a-7fc8-11eb-1c93-6bea66e573c4
+md"""
+## Getting Heavier on Code: Producing Albums Recommendations and Evaluating Them
+
+To do our evaluation, we're going to get a big more code heavy.
+
+In short, what we're doing below is running through each user and their corresponding test items, producing a personalized score for each item, and then sorting the item by score to produce a "Top Albums for You" list. 
+
+If the "correct" item (Scary Hours 2, aka Item 3 for Cam and After Hours, aka Item 6 for Di) is at the top of the list, we're successful. If not, we can do better (and we will do so, by "training" the model. 
 """
 
 # ╔═╡ f0459d50-7e11-11eb-324f-b3d2295ac7e7
@@ -186,22 +217,24 @@ function evaluate(model, test, test_negatives, do_print)
 		full_list = sort(collect(zip(values(d),keys(d))), rev=true)
 		rank = 1
 		hit = 0
-		if do_print == true
-			for tup in full_list
-				item = tup[2]
-				score = tup[1]
+		for tup in full_list
+			item = tup[2]
+			score = tup[1]
+			if do_print
 				print("At rank $rank, we have item $item with a score of $score ")
-				if item == target
-					print("(this is the target)")
-					if rank == 1
-						print("\nSUCCESS!")
-						hit = 1
-					end
-				end
-				print("\n")
-				rank +=1
-
 			end
+			if item == target
+				#print("(this is the target)")
+				if rank == 1
+					if do_print
+						print("\nSUCCESS!")
+					end
+					hit = 1
+				end
+			end
+			print("\n")
+			rank +=1
+
 		end
 		hits += hit
 
@@ -214,6 +247,24 @@ with_terminal() do
 	evaluate(model, test, test_negatives, true)
 end
 
+# ╔═╡ df1ba504-7fc8-11eb-0434-2baf60c49221
+md"""
+## How did we do?
+As expected, our model which *hasn't seen any training data yet* doesn't do so well.
+
+What we'll do now is train the model.
+
+To summarize, we'll:
+
+* show the model each training observation (a user-item pair which either says "this person DID listen to this album" or "this person DID NOT listen to this album)
+* see what score the model gives each user-item pair
+* based on the score, calculate a "loss". Loss tells us roughly how well we're doing, with lower being better.
+* Update our model "weights" based on how well we did for that particular observation. This is the "learning portion". It's where the learning rate comes in.
+* At each step, the model gradually changes (hopefully for the better).
+
+We repeat this enough times in hopes that we'll eventually learn to produce better recommendations.
+"""
+
 # ╔═╡ ca17072e-7e12-11eb-006d-0be35c993c7c
 md"""
 Loss tells us roughly, how well we're doing. Lower is better.
@@ -223,10 +274,13 @@ Loss tells us roughly, how well we're doing. Lower is better.
 with_terminal() do
 	for i in 1:epochs
 		loss = round(fit!(model, config, pairs), digits=3)
-		print("'Loss': $loss ")
+		#print("'Loss': $loss ")
 		hits = evaluate(model, test, test_negatives, false)
+		#print(hits, "\n")
 		if hits == 2
+			print("After seeing the training dataset $i times, we've succeeded")
 			evaluate(model, test, test_negatives, true)
+			break
 		end
 	end
 	
@@ -234,11 +288,6 @@ end
 
 # ╔═╡ 6e47ef50-7ddb-11eb-03fd-b5ee93de3183
 model
-
-# ╔═╡ 95dde330-7e12-11eb-0b90-752ed6062d41
-md"""
-Just to check, how exactly did we make our predictions?
-"""
 
 # ╔═╡ a5ba4050-7e12-11eb-0c4a-333c3599ad35
 
@@ -264,14 +313,15 @@ Just to check, how exactly did we make our predictions?
 # ╠═5b60e710-7dd7-11eb-0f4f-456719976680
 # ╠═5e9cd830-7dd7-11eb-26ec-a74cdd4fa3ed
 # ╠═73ba9360-7dd7-11eb-1388-63c1b8ad7064
+# ╠═369530b6-7fc7-11eb-350c-dfd7d2d2ac3b
 # ╠═cdecd942-7e10-11eb-37cd-0de10a09d01f
 # ╠═ac781c20-7dd9-11eb-0099-4315647a7e14
 # ╟─10af7490-7e11-11eb-1b47-156e177197c2
-# ╠═88fa2210-7e11-11eb-2a02-39213f33d8b9
+# ╠═205aba9a-7fc8-11eb-1c93-6bea66e573c4
 # ╠═f0459d50-7e11-11eb-324f-b3d2295ac7e7
 # ╠═9438f220-7dd8-11eb-1081-d91fb8c003db
+# ╠═df1ba504-7fc8-11eb-0434-2baf60c49221
 # ╠═ca17072e-7e12-11eb-006d-0be35c993c7c
 # ╠═5f975d70-7dda-11eb-2a5b-2fdbd930400b
 # ╠═6e47ef50-7ddb-11eb-03fd-b5ee93de3183
-# ╠═95dde330-7e12-11eb-0b90-752ed6062d41
 # ╠═a5ba4050-7e12-11eb-0c4a-333c3599ad35
