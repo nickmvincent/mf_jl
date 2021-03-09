@@ -24,31 +24,29 @@ struct Config
 end
 
 mutable struct MfModel
-    u_emb::Array{Float64} # user embeddings
-    i_emb::Array{Float64} # item embeddings
-    u_b::Array{Float64} # user biases
-    i_b::Array{Float64} # item biases
+    u_emb::Matrix{Float64} # user embeddings
+    i_emb::Matrix{Float64} # item embeddings
+    u_b::Vector{Float64} # user biases
+    i_b::Vector{Float64} # item biases
     b::Float64 # global bias
 end
 
 """
 take a model, user index, and item index, and predict a score
-before calling, check for -1 (unseen) values
+before calling, check for -1 (unseen) value s
 """
 function predict_one(m::MfModel, user::Int, item::Int)
-
     return m.b + m.u_b[user] + m.i_b[item] + dot(
-        m.u_emb[user, :], m.i_emb[item, :]
+        m.u_emb[:, user], m.i_emb[:,item]
     )
 end
 
 """
 Make a prediction for each user x item.
-    users - array of users. Must be same length as items.
-    items - array of items.
+    users - Matrix of users. Must be same length as items.
+    items - Matrix of items.
 """
-function predict(model::MfModel, users::Array{Int}, items::Array{Int})
-    
+function predict(model::MfModel, users::Vector{Int}, items::Vector{Int})
     n_examples = length(users)
     preds = zeros(n_examples)
     for i = 1:n_examples
@@ -69,18 +67,19 @@ following the NCF paper
 pairs is: positive pairs (user, item), and number of n_negatives (user didn't hit item) to randomly sample
 triplets are user, item, hit/no hit
 """
-function convert_implicit_triplets(n_items::Int, pairs::Array{Int}, n_negatives::Int)
+function convert_implicit_triplets(n_items::Int, pairs_in_cols::Matrix{Int}, n_negatives::Int)
    
-    n_pairs = size(pairs)[1]
-    matrix = zeros(n_pairs * (1+n_negatives), 3)
-    index = 1
+    n_pairs = size(pairs_in_cols, 2)
+    # 3 (user-item-hit) x n_pairs * total_per_user. e.g. for n_negatives = 8, size is 3 x (n_users*9)
+    # we'll transpose at the end. We're doing this cause Julia use column-major
+    triplets_in_cols = zeros(Int, 3, n_pairs * (1+n_negatives))
+    col_index = 1
 
-    for pos_index = 1:n_pairs
-        user = pairs[pos_index, 1]
-        item = pairs[pos_index, 2]
+    for pair_col = 1:n_pairs
+        user, item = pairs_in_cols[:, pair_col]
 
-        matrix[index, :] = [user, item, 1]
-        index += 1
+        triplets_in_cols[:, col_index] = [user, item, 1]
+        col_index += 1
 
         # as in Rendle et al., we just sample from ALL KNOWN items
         # this means we could include a negative twice, or include a 
@@ -88,11 +87,11 @@ function convert_implicit_triplets(n_items::Int, pairs::Array{Int}, n_negatives:
         for a = 1:n_negatives # a is unused
             random_item = rand(1:n_items)
             
-            matrix[index, :] = [user, random_item, 0]
-            index += 1
+            triplets_in_cols[:, col_index] = [user, random_item, 0]
+            col_index += 1
         end
     end
-    return convert(Array{Int}, matrix)
+    return triplets_in_cols
 end
 
 """
@@ -119,11 +118,11 @@ end
 """
 fit the model with SGD
 """
-function fit!(model::MfModel, config::Config, train_arr::Array{Int})
-    n_items = size(model.i_emb)[1]
+function fit!(model::MfModel, config::Config, train::Matrix{Int})
+    n_items = size(model.i_emb, 2)
     # format the training data and shuffle (to avoid cycles)
-    triplets = convert_implicit_triplets(n_items, train_arr, config.n_negatives)
-    shuffled = triplets[shuffle(1:end), :]
+    triplets = convert_implicit_triplets(n_items, train, config.n_negatives)
+    shuffled_transposed = triplets[:, shuffle(1:end)]
     
 
     ΣL = 0.0 # summed loss
@@ -133,12 +132,12 @@ function fit!(model::MfModel, config::Config, train_arr::Array{Int})
 
     # SGD loop
     # TODO minibatch + parallelize?
-    n_examples = size(shuffled)[1]
+    n_examples = size(shuffled_transposed, 2)
     for i = 1:n_examples
-        user, item, y = shuffled[i, :]
+        user, item, y = shuffled_transposed[:, i]
         
-        u_emb = copy(model.u_emb[user, :])
-        i_emb = copy(model.i_emb[item, :])
+        u_emb = copy(model.u_emb[:, user])
+        i_emb = copy(model.i_emb[:, item])
 
         p = predict_one(model, user, item)
         σ, L = compute_loss(p, y)
@@ -146,8 +145,8 @@ function fit!(model::MfModel, config::Config, train_arr::Array{Int})
 
         # Update weights
 
-        model.u_emb[user, :] -= η * (∂L * i_emb + λ * u_emb) #eq 11
-        model.i_emb[item, :] -= η * (∂L * u_emb + λ * i_emb) #eq 12
+        model.u_emb[:, user] -= η * (∂L * i_emb + λ * u_emb) #eq 11
+        model.i_emb[:, item] -= η * (∂L * u_emb + λ * i_emb) #eq 12
         
         model.u_b[user] -= η * (∂L + λ * model.u_b[user]) #eq 9
         model.i_b[item] -= η * (∂L + λ * model.i_b[item]) #eq 10
@@ -165,34 +164,33 @@ end
 evalute the recommender model using "leave last out" (holdout LAST hit item + 100 random negatives)
 based on this code/paper: https://github.com/hexiangnan/neural_collaborative_filtering/blob/master/evaluate.py
 """
-function evaluate(model::MfModel, test_ratings::Array{Int}, test_negatives::Array{Int}, k::Int)
+function evaluate(model::MfModel, test_hits::Matrix{Int}, test_negatives::Matrix{Int}, k::Int)
     hits = []
     ndcgs = []
-    for i in 1:size(test_ratings)[1]
-        triplet = test_ratings[i, :]
-        negatives = test_negatives[i, :]
-        hit, ndcg = eval_one_rating(model, triplet, negatives, k)
+    for col in 1:size(test_hits, 2)
+        triplet_col = test_hits[:, col]
+        negatives_col = test_negatives[:, col]
+        hit, ndcg = eval_one_rating(model, triplet_col, negatives_col, k)
         append!(hits, hit)
         append!(ndcgs, ndcg)
     end
     return hits, ndcgs
 end
 
-function eval_one_rating(model::MfModel, triplet::Array{Int}, negatives::Array{Int}, k::Int)
-    items = negatives
+function eval_one_rating(model::MfModel, triplet::Vector{Int}, negatives::Vector{Int}, k::Int)
+    items = copy(negatives)
     user, target, hit = triplet
 
     append!(items, target)
     
-    d = Dict() # item to score dict
     users = fill(user, length(items))
     preds = predict(model, users, items)
 
+    d = Dict() # item to score dict
     for i=1:length(items)
         item = items[i]
         d[item] = preds[i]
     end
-    pop!(items)
 
     topk = sort(collect(zip(values(d),keys(d))), rev=true)[1:k]
 
@@ -221,7 +219,8 @@ end
 function main(;
     epochs=20, embedding_dim=16, stdev=0.1,
     frac=1.0, lever_size=0, lever_genre="All", lever_type="strike",
-    learning_rate=0.002, regularization=0.005, n_negatives = 8, outname="out"
+    learning_rate=0.002, regularization=0.005, n_negatives = 8, outname="out",
+    k = 10
 )
     #"ml-100k/u.data"
     filename = "ml-1m/ratings.dat"
@@ -229,12 +228,20 @@ function main(;
     delim = "::"
     strat = "leave_out_last"
     lever = Lever(lever_size, lever_genre, lever_type)
-    train, test_hits, test_negatives, n_users, n_items, items, all_genres = load(
+    train_df, test_hits_df, test_negatives, n_users, n_items, items, all_genres = load(
         filename, lever, delim=delim, strat=strat, frac=frac, item_filename=item_filename
     )
 
-    n_train = size(train)[1]
-    n_test = size(test_hits)[1]
+    # transpose everything so we can access by column
+    # + convert data to Int Matrixs to make Julia compiler happer
+    my_convert = x -> copy(transpose(convert(Matrix{Int}, x)))
+
+    train = my_convert(train_df[:, ["user", "item"]])
+    test_hits = my_convert(test_hits_df)
+    test_negatives = my_convert(test_negatives)
+
+    n_train = size(train, 2)
+    n_test = size(test_hits, 2)
     print("n_users: $n_users, n_items: $n_items, n_train: $n_train, num_test: $n_test \n")
 
     # config for training the recsys
@@ -252,21 +259,14 @@ function main(;
 
     # init the model. Embeddings are drawn from normal, biases start at zero.
     dist = Normal(0, config.stdev)
-    u_emb = rand(dist, n_users, config.embedding_dim)
-    i_emb = rand(dist, n_items, config.embedding_dim)
+    u_emb = rand(dist, config.embedding_dim, n_users)
+    i_emb = rand(dist, config.embedding_dim, n_items)
     u_b = zeros(n_users)
     i_b = zeros(n_items)
     b = 0.0
     model = MfModel(u_emb, i_emb, u_b, i_b, b)
-
-    # convert data to Int arrays to make Julia compiler happer
-    train_arr = convert(Array{Int},  train[:, ["user", "item"]])
-    test_hits_arr = convert(Array{Int}, test_hits)
-    test_neg_arr = convert(Array{Int}, test_negatives)
     
-    k = 10
-
-    rand_hits, rand_ndcgs = evaluate(model, test_hits_arr, test_neg_arr, k)
+    rand_hits, rand_ndcgs = evaluate(model, test_hits, test_negatives, k)
     rand_hr = mean(rand_hits)
     rand_ndcg = mean(rand_ndcgs)
     print("HR: $rand_hr | NDCG: $rand_ndcg\n")
@@ -275,14 +275,14 @@ function main(;
     for epoch=1:config.epochs
         record = Dict{Any,Any}("epoch"=>epoch, "n_train"=>n_train, "lever_size"=>lever_size, "lever_genre"=>lever_genre)
         record["epoch"] = epoch
-        #print(train_arr[1:10, :], "\n|")
+        #print(train[1:10, :], "\n|")
         # == Fit ==
         t_start_fit = time()
-        mean_loss = fit!(model, config, train_arr)
+        mean_loss = fit!(model, config, train)
         time_elapsed = time() - t_start_fit
         record["time_elapsed"] = time_elapsed
         # == Evaluate ==
-        hits, ndcgs = evaluate(model, test_hits_arr, test_neg_arr, k)
+        hits, ndcgs = evaluate(model, test_hits, test_negatives, k)
         hr = mean(hits)
         ndcg = mean(ndcgs)
         record["hr"] = hr
@@ -294,13 +294,13 @@ function main(;
         print("$epoch:\t HR: $s1, NDCG: $s2, TrainL: $s3, Time: $s4\n")
         for genre in all_genres
             matches = items[items[:, genre], "item"]
-            mask = [x in matches for x in test_hits.item]
+            mask = [x in matches for x in test_hits_df.item]
             genre_hr = round(mean(hits[mask]), digits=2)
             genre_ndcg = round(mean(ndcgs[mask]), digits=2)
             record["hr_$genre"] = genre_hr
             record["hits_$genre"] = sum(hits[mask])
             record["ndcg_$genre"] = genre_ndcg
-            print("$genre $genre_hr|")
+            #print("$genre $genre_hr|")
         end 
         push!(records, record)
     end
@@ -313,7 +313,7 @@ function main(;
 end
 
 # res = main(
-#     epochs=2, learning_rate=0.01, regularization=0.005,
-#     frac=0.05, n_negatives=8, lever_size=0.1, lever_genre="Comedy"
+#     epochs=256, learning_rate=0.002, regularization=0.005,
+#     frac=1.0, n_negatives=8, lever_size=0.0, outname="0.5_256_epoch.csv"
 # )
 
