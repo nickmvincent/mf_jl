@@ -18,7 +18,7 @@ lever_size = 0
 # ╔═╡ bfd57090-8074-11eb-0b28-8d5f91f7acf5
 res = main(
     epochs=epochs, learning_rate=learning_rate, regularization=regularization,
-    frac=frac, n_negatives=8, lever_size=lever_size, outname="replicate.csv"
+    frac=frac, n_negatives=8, lever_size=lever_size, outname="results/replicate.csv", model_filename="models/replicate.jld"
 )
 
 

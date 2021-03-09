@@ -3,7 +3,7 @@ Adapted from:
 https://github.com/google-research/google-research/blob/master/dot_vs_learned_similarity/mf_simple.py
 =#
 
-using Random, Distributions, LinearAlgebra, CSV, DataFrames, Printf
+using Random, Distributions, LinearAlgebra, CSV, DataFrames, Printf, JLD
 
 include("./data.jl") # load, prep, and split movielens data
 include("./eval.jl") # evaluate recsys
@@ -29,6 +29,7 @@ mutable struct MfModel
     u_b::Vector{Float64} # user biases
     i_b::Vector{Float64} # item biases
     b::Float64 # global bias
+    epoch::Int #keep track of how many epochs the model has been trained
 end
 
 """
@@ -206,6 +207,7 @@ end
 # frac = 1.0
 # lever_size = 0
 # lever_genre = ""
+# lever_type = "strike"
 # learning_rate = 0.01
 # regularization = 0.005
 # n_negatives = 8
@@ -220,7 +222,7 @@ function main(;
     epochs=20, embedding_dim=16, stdev=0.1,
     frac=1.0, lever_size=0, lever_genre="All", lever_type="strike",
     learning_rate=0.002, regularization=0.005, n_negatives = 8, outname="out",
-    k = 10
+    k = 10, model_filename="", load_model=false
 )
     #"ml-100k/u.data"
     filename = "ml-1m/ratings.dat"
@@ -228,7 +230,7 @@ function main(;
     delim = "::"
     strat = "leave_out_last"
     lever = Lever(lever_size, lever_genre, lever_type)
-    train_df, test_hits_df, test_negatives, n_users, n_items, items, all_genres = load(
+    train_df, test_hits_df, test_negatives, n_users, n_items, items, all_genres = load_custom(
         filename, lever, delim=delim, strat=strat, frac=frac, item_filename=item_filename
     )
 
@@ -258,13 +260,19 @@ function main(;
     print(config, "\n")
 
     # init the model. Embeddings are drawn from normal, biases start at zero.
-    dist = Normal(0, config.stdev)
-    u_emb = rand(dist, config.embedding_dim, n_users)
-    i_emb = rand(dist, config.embedding_dim, n_items)
-    u_b = zeros(n_users)
-    i_b = zeros(n_items)
-    b = 0.0
-    model = MfModel(u_emb, i_emb, u_b, i_b, b)
+    if load_model
+        d = load(model_filename)
+        model = d["model"]
+    else
+        dist = Normal(0, config.stdev)
+        u_emb = rand(dist, config.embedding_dim, n_users)
+        i_emb = rand(dist, config.embedding_dim, n_items)
+        u_b = zeros(n_users)
+        i_b = zeros(n_items)
+        bias = 0.0
+        epoch = 1
+        model = MfModel(u_emb, i_emb, u_b, i_b, bias, epoch)
+    end
     
     rand_hits, rand_ndcgs = evaluate(model, test_hits, test_negatives, k)
     rand_hr = mean(rand_hits)
@@ -272,7 +280,11 @@ function main(;
     print("HR: $rand_hr | NDCG: $rand_ndcg\n")
 
     records = []
-    for epoch=1:config.epochs
+    for epoch=model.epoch:config.epochs
+        model.epoch = epoch
+        if epoch % 10 == 0
+            save(model_filename, "model", model)
+        end
         record = Dict{Any,Any}("epoch"=>epoch, "n_train"=>n_train, "lever_size"=>lever_size, "lever_genre"=>lever_genre)
         record["epoch"] = epoch
         #print(train[1:10, :], "\n|")
@@ -303,6 +315,7 @@ function main(;
             #print("$genre $genre_hr|")
         end 
         push!(records, record)
+        
     end
     results = DataFrame(records[1])
     for record in records[2:end]
@@ -311,9 +324,3 @@ function main(;
     write_output(results, outname)
     return results
 end
-
-# res = main(
-#     epochs=256, learning_rate=0.002, regularization=0.005,
-#     frac=1.0, n_negatives=8, lever_size=0.0, outname="0.5_256_epoch.csv"
-# )
-

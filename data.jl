@@ -15,7 +15,7 @@ function get_item_df(item_filename, delim)
     item_df, all_genres
 end
 
-function load(
+function load_custom(
     filename, lever; delim="\t", strat="leave_out_last", frac=1.0, item_filename=""
 )
     df = CSV.read(filename, DataFrame, delim=delim, header=["orig_user", "orig_item", "rating", "utc"])
