@@ -1,8 +1,22 @@
-using CSV, DataFrames, Printf
+using CSV, DataFrames, Printf, Random
+
+function get_item_df(item_filename, delim)
+    item_df = CSV.read(item_filename, DataFrame, delim=delim, header=["orig_item", "name", "genres"])
+    genre_arrs = [split(x, '|') for x in item_df.genres]
+    all_genres = []
+    for genre_arr in genre_arrs
+        append!(all_genres, genre_arr)
+    end
+    all_genres = convert(Array{String}, unique(all_genres))
+    for genre in all_genres
+        vals = [genre in x for x in genre_arrs]
+        item_df[:, genre] = vals
+    end
+    item_df, all_genres
+end
 
 function load(
-    filename; delim="\t", strat="leave_out_last", frac=1.0, item_filename="",
-    strike_size=0, strike_genre=""
+    filename, lever; delim="\t", strat="leave_out_last", frac=1.0, item_filename=""
 )
     df = CSV.read(filename, DataFrame, delim=delim, header=["orig_user", "orig_item", "rating", "utc"])
     # can implement a hit threshold here.
@@ -86,41 +100,50 @@ function load(
     end
 
     
-    item_df = CSV.read(item_filename, DataFrame, delim=delim, header=["orig_item", "name", "genres"])
-    genre_arrs = [split(x, '|') for x in item_df.genres]
-    all_genres = []
-    for genre_arr in genre_arrs
-        append!(all_genres, genre_arr)
-    end
-    all_genres = convert(Array{String}, unique(all_genres))
-    for genre in all_genres
-        vals = [genre in x for x in genre_arrs]
-        item_df[:, genre] = vals
-    end
+    item_df, all_genres = get_item_df(item_filename, delim)
     item_df[:, "item"] = map(get_item, item_df.orig_item)
 
     #do strike here
-    if strike_size > 0
-        if strike_genre != ""
-            elig_observations = item_df[item_df[:, strike_genre], "orig_item"]
-            n_obs = size(elig_observations)[1]
-            print(strike_genre, n_obs, "\n")
-            n_drop = Int(floor(strike_size * n_obs))
+    if lever.size > 0
+        if lever.genre != "All"
+            elig_observations = item_df[item_df[:, lever.genre], "orig_item"]
+            n_obs = size(elig_observations, 1)
+            print(lever.genre, n_obs, "\n")
+            n_drop = Int(floor(lever.size * n_obs))
 
-            print("$strike_genre, $n_obs, $n_drop\n")
+            print("$lever.genre, $n_obs, $n_drop\n")
 
-            drop = shuffle(elig_observations)[1:n_drop]
+            if lever.type == "strike"
+                drop = shuffle(elig_observations)[1:n_drop]
 
-            mask = [!(x in drop) for x in df.orig_item]
-            df = df[mask, :]
+                mask = [!(x in drop) for x in df.orig_item]
+                df = df[mask, :]
+            elseif lever.type == "poison"
+                mask = shuffle(elig_observations)[1:n_drop]
+                df[mask, :item] = rand(unique(df.item))
+
+                #mask = [!(x in drop) for x in df.orig_item]
+                df = df[mask, :]
+            end
+
         else
             n_orig_users = length(unique(df.orig_user))
             elig_users = 1:n_orig_users
-            n_drop = Int(floor(strike_size * n_orig_users))
-            strike_users = shuffle(elig_users)[1:n_drop]
-            mask = [!(x in strike_users) for x in df.orig_user]
-            df = df[mask, :]
+            n_lever_users = Int(floor(lever.size * n_orig_users))
+            lever_users = shuffle(elig_users)[1:n_lever_users]
+            mask = [(x in lever_users) for x in df.orig_user]
 
+            if lever.genre != "All"
+                matching_observations = item_df[item_df[:, lever.genre], "orig_item"]
+                mask = [x in matching_observations for x in df.orig_item] .& mask
+            end
+
+            if lever.type == "strike"
+                df = df[.!mask, :]
+            elseif lever.type == "poison"
+                df[mask, :item] = rand(unique(df.item))
+                df = df[mask, :]
+            end
         end
     end
     

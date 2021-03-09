@@ -5,71 +5,148 @@ using Markdown
 using InteractiveUtils
 
 # ╔═╡ b81173a0-7d71-11eb-05de-252115b9905c
-using Plots, DataFrames, Printf, CSV
+using Gadfly, DataFrames, Printf, CSV
 
 # ╔═╡ a9045180-7bbd-11eb-334b-d9a2fc106895
 include("./mf_simple.jl")
 
+# ╔═╡ c8f6e970-803c-11eb-1044-833a5c296b23
+include("./data.jl")
+
 # ╔═╡ ed417ac0-7d71-11eb-3433-2bb5d1bde552
+md"""
+# Interactive Data Leverage
+## Simulating "Data Strikes", "Data Poisoning", and "Conscious Data Contribution" Against a Matrix Factorization Recommender System
 
+In this notebook, we provide Julia code that illustrates an approach for simulating "data leverage campaigns" against a recommender system.
 
-# ╔═╡ 22804ef0-7d72-11eb-13b0-832f251c034a
+This is mainly meant to (1) illustrate how data leverage simulations can work and (2)provide a degree of interactivity.
 
+Currently, interacting with this notebook requires familiarity with the Julia programming language, but we plan to produce an Observable Notebook version loaded with pre-computed results, which requires only a web browser to interact with.
+
+"""
+
+# ╔═╡ f25307e0-8032-11eb-19b2-f7c7b57a7b00
+md"""
+## Configuration of the Recommender
+
+A brief description of our configuration:
+* `epochs` - how many times to look at the training data. More looks = we can get better performance, but it takes longer to train.
+* `embedding_dim` - the "embedding dimension". How big will our model be? Bigger can get better performance, but it takes longer to train and uses up more space on our computer.
+* η - the learning rate. Bigger means our model changes more quickly ("learns faster"), but setting this too large can cause problems. Typically set fairly low to be safe.
+* λ - the "regularization". Bigger roughly means we prioritize a simpler model over a more complex model.
+* `n_negatives` - each time we train with our "hits" (user-item pairs), we also want to train on some misses. In other words, we also include the fact that certain users *didn't* listen to certain albums. Having a larger n_negatives means we train on more misses.
+* `stdev` - the standard deviation of the normal distribution that we pick our random starting embeddings from. Not a major concern, we'll just use the value suggested by Rendle and colleagues.
+
+"""
 
 # ╔═╡ c5e179d0-7dd0-11eb-18a1-95b44b195b59
 epochs, embedding_dim, frac, learning_rate, regularization, n_negatives = (
-	20, 16, 0.2, 0.002, 0.005, 8
+	20, 16, 0.1, 0.002, 0.005, 8
 )
+
+# ╔═╡ cdcb5d70-8053-11eb-1337-c7b88699aad1
+md"""
+Some notes
+
+* we'll use just 20 epochs and set frac to 0.1 so our experiments don't take too long. This means we use only 10% of total data as the "maximum" data and show our mode the training data just 20 times. This means our maximum accuracy wil be lower than the "State of Art", but we can still show the general trends.
+"""
 
 # ╔═╡ 921ebc80-7e0b-11eb-0ee7-43707e956e9a
 nice_dfs = []
 
+# ╔═╡ 85dab1e0-803b-11eb-06a5-0782aee168c5
+item_filename, delim = "ml-1m/movies.dat", "::"
+
+# ╔═╡ 41a525a0-803b-11eb-0638-25d23fb54f96
+item_df, all_genres = get_item_df(item_filename, delim)
+
+# ╔═╡ 32898b00-803c-11eb-28bf-85936aaf4b8f
+names(item_df)
+
+# ╔═╡ 23e13020-8033-11eb-3052-7ba5a9019aad
+md"""
+# Data Lever Parameters
+
+
+Let's we are organizing a data leverage campaign, and have some set of resources (funds, social capital, etc.) to allocate to organizing. We have to make choices about three "parameters" that describe our campaign
+
+* size - how many people participate?
+* genre - will our campaign target a specific genre of movies?
+* type - will we engage in a data strike (delete data) or data poisoning (replace good data with "bad" data)? In this notebook, we consider "random replacement" data poisoning attacks in which participants remove their movie ratings (for a particular genre, if the campaign is targeted) and randomly pick an equal number of movies to rate.
+
+"""
+
+# ╔═╡ aa5920d0-8057-11eb-3016-5f4e49c937f6
+lever_type = "strike"
+
 # ╔═╡ 13f3bfd0-7d71-11eb-3275-e5bde57f6cc9
-Threads.@threads for strike_size in [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
-	for strike_genre in ["", "Comedy"]
-		outname = "results/e=$epochs-dim=$embedding_dim-frac=$frac-strike=$strike_size-genre=$strike_genre-lr=$learning_rate-reg=$regularization-neg=$n_negatives.csv"
+Threads.@threads for lever_size in [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+	for lever_genre in ["", "Comedy", "Action", "Drama"]
+		outname = "results/d=$embedding_dim,trn=$epochs-$learning_rate-$regularization-$n_negatives,frac=$frac,lever=$lever_size-$lever_genre-$lever_type"
 		print(outname, "\n")
 		#results = CSV.read(outname, DataFrame)
 		if isfile(outname)
 			results = CSV.read(outname, DataFrame)
 		else
 			results = main(
-				epochs=epochs, strike_size=strike_size, frac=frac,
-				strike_genre=strike_genre
+				epochs=epochs, lever_size=lever_size, frac=frac,
+				lever_genre=lever_genre, outname=outname
 			)
 		end
-		cols = ["strike_size", "n_train", "strike_genre", "hr", "Action hr", "Comedy hr"]
+		cols = ["lever_size", "n_train", "lever_genre", "hr", "hr_Action", "hr_Comedy", "hr_Drama"]
 		nice = results[end, cols]
 
 		push!(nice_dfs, nice)
 	end
 end
 
-# ╔═╡ 069786d0-7dd2-11eb-359e-d7783233628d
-
-
 # ╔═╡ 291a54a0-7d71-11eb-0489-1bed3e39ca1c
-nice_df = DataFrame(vcat(nice_dfs...))
+nice_df = DataFrame(vcat(nice_dfs...));
 
-# ╔═╡ 8157b140-7e0b-11eb-2fdd-052e2ef2e9ca
-sort(nice_df, :strike_size)
+# ╔═╡ 876beb20-8039-11eb-18dd-a543b3797128
+size(nice_df)
 
-# ╔═╡ af1db160-7d70-11eb-305d-6d0253d17454
-plot(nice_df.strike_size, nice_df.hr, group=nice_df.strike_genre, kind="scatter")
+# ╔═╡ 1b62b630-8038-11eb-1827-a1a9bef09c2c
+nice_df_filled = coalesce.(nice_df, "Any");
 
-# ╔═╡ 14601060-7dd8-11eb-3fdc-4db77ed819c2
-?plot
+# ╔═╡ f064368e-803a-11eb-2caa-15eabf7b7f19
+stacked = stack(nice_df_filled, ["hr", "Action hr", "Comedy hr", "Drama hr"])
+
+# ╔═╡ a17259de-8035-11eb-0ed7-2f65f80a7131
+p1 = plot(
+	stacked, x=:lever_size, y=:value, color=:lever_genre, xgroup=:variable,
+	Geom.subplot_grid(Geom.point)
+)
+
+# ╔═╡ d0c34a10-803a-11eb-36be-ff456de81a52
+p2 = plot(
+	stacked, x=:n_train, y=:value, color=:lever_genre, xgroup=:variable,
+	Geom.subplot_grid(Geom.point)
+)
+
+# ╔═╡ 15d9e580-8051-11eb-1f96-cb30074ec481
+
 
 # ╔═╡ Cell order:
 # ╠═ed417ac0-7d71-11eb-3433-2bb5d1bde552
 # ╠═a9045180-7bbd-11eb-334b-d9a2fc106895
+# ╠═c8f6e970-803c-11eb-1044-833a5c296b23
 # ╠═b81173a0-7d71-11eb-05de-252115b9905c
-# ╠═22804ef0-7d72-11eb-13b0-832f251c034a
+# ╠═f25307e0-8032-11eb-19b2-f7c7b57a7b00
 # ╠═c5e179d0-7dd0-11eb-18a1-95b44b195b59
+# ╠═cdcb5d70-8053-11eb-1337-c7b88699aad1
 # ╠═921ebc80-7e0b-11eb-0ee7-43707e956e9a
+# ╠═85dab1e0-803b-11eb-06a5-0782aee168c5
+# ╠═41a525a0-803b-11eb-0638-25d23fb54f96
+# ╠═32898b00-803c-11eb-28bf-85936aaf4b8f
+# ╠═23e13020-8033-11eb-3052-7ba5a9019aad
+# ╠═aa5920d0-8057-11eb-3016-5f4e49c937f6
 # ╠═13f3bfd0-7d71-11eb-3275-e5bde57f6cc9
-# ╠═069786d0-7dd2-11eb-359e-d7783233628d
+# ╠═876beb20-8039-11eb-18dd-a543b3797128
 # ╠═291a54a0-7d71-11eb-0489-1bed3e39ca1c
-# ╠═8157b140-7e0b-11eb-2fdd-052e2ef2e9ca
-# ╠═af1db160-7d70-11eb-305d-6d0253d17454
-# ╠═14601060-7dd8-11eb-3fdc-4db77ed819c2
+# ╠═1b62b630-8038-11eb-1827-a1a9bef09c2c
+# ╠═f064368e-803a-11eb-2caa-15eabf7b7f19
+# ╠═a17259de-8035-11eb-0ed7-2f65f80a7131
+# ╠═d0c34a10-803a-11eb-36be-ff456de81a52
+# ╠═15d9e580-8051-11eb-1f96-cb30074ec481

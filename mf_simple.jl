@@ -10,6 +10,10 @@ include("./eval.jl") # evaluate recsys
 
 #Random.seed!(123) # Setting the seed
 
+function write_output(res, name)
+    CSV.write("$name", res)
+end
+
 struct Config
     epochs::Int # number of epochs to train for
     embedding_dim::Int # embedding dim
@@ -202,25 +206,31 @@ end
 # embedding_dim = 16
 # stdev = 0.1
 # frac = 1.0
-# strike_size = 0
-# strike_genre = ""
+# lever_size = 0
+# lever_genre = ""
 # learning_rate = 0.01
 # regularization = 0.005
 # n_negatives = 8
 
+struct Lever
+    size::Float64
+    genre::Any
+    type::Any
+end
+
 function main(;
     epochs=20, embedding_dim=16, stdev=0.1,
-    frac=1.0, strike_size=0, strike_genre="",
-    learning_rate=0.002, regularization=0.005, n_negatives = 8
+    frac=1.0, lever_size=0, lever_genre="All", lever_type="strike",
+    learning_rate=0.002, regularization=0.005, n_negatives = 8, outname="out"
 )
     #"ml-100k/u.data"
     filename = "ml-1m/ratings.dat"
     item_filename = "ml-1m/movies.dat"
     delim = "::"
     strat = "leave_out_last"
+    lever = Lever(lever_size, lever_genre, lever_type)
     train, test_hits, test_negatives, n_users, n_items, items, all_genres = load(
-        filename, delim=delim, strat=strat, frac=frac, item_filename=item_filename,
-        strike_size=strike_size, strike_genre=strike_genre
+        filename, lever, delim=delim, strat=strat, frac=frac, item_filename=item_filename
     )
 
     n_train = size(train)[1]
@@ -263,7 +273,7 @@ function main(;
 
     records = []
     for epoch=1:config.epochs
-        record = Dict{Any,Any}("epoch"=>epoch, "n_train"=>n_train, "strike_size"=>strike_size, "strike_genre"=>strike_genre)
+        record = Dict{Any,Any}("epoch"=>epoch, "n_train"=>n_train, "lever_size"=>lever_size, "lever_genre"=>lever_genre)
         record["epoch"] = epoch
         #print(train_arr[1:10, :], "\n|")
         # == Fit ==
@@ -287,8 +297,9 @@ function main(;
             mask = [x in matches for x in test_hits.item]
             genre_hr = round(mean(hits[mask]), digits=2)
             genre_ndcg = round(mean(ndcgs[mask]), digits=2)
-            record["$genre hr"] = genre_hr
-            record["$genre ndcg"] = genre_ndcg
+            record["hr_$genre"] = genre_hr
+            record["hits_$genre"] = sum(hits[mask])
+            record["ndcg_$genre"] = genre_ndcg
             print("$genre $genre_hr|")
         end 
         push!(records, record)
@@ -297,33 +308,12 @@ function main(;
     for record in records[2:end]
         push!(results, record)
     end
-    cols = ["strike_size", "n_train", "strike_genre", "hr", "Action hr", "Comedy hr"]
-    write(results)
-    return results, results[end, cols]
+    write_output(results, outname)
+    return results
 end
 
-# res, nice = main(
-#     epochs=5, learning_rate=0.01, regularization=0.005,
-#     frac=0.05, n_negatives=8
+# res = main(
+#     epochs=2, learning_rate=0.01, regularization=0.005,
+#     frac=0.05, n_negatives=8, lever_size=0.1, lever_genre="Comedy"
 # )
-
-function write(nice)
-
-    ts = now()
-    CSV.write("$ts.csv", res)
-end
-
-
-# all = []
-# nice_dfs = []
-# for size in [0, 0.1, 0.2, 0.3, 0.4, 0.5]
-#     res, nice = main(epochs=10, strike_size=size)
-#     res_comedy, nice_comedy = main(epochs=10, strike_size=size, strike_genre="Comedy")
-#     push!(all, res)
-#     push!(all, res_comedy)
-
-#     push!(nice_dfs, nice)
-#     push!(nice_dfs, nice_comedy)
-# end
-# nice_df = DataFrame(vcat(nice_dfs...))
 
