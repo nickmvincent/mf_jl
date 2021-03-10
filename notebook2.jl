@@ -43,9 +43,6 @@ Currently, interacting with this notebook requires familiarity with the Julia pr
 
 """
 
-# ╔═╡ 17541050-807b-11eb-23d7-dfc900345c4d
-
-
 # ╔═╡ f25307e0-8032-11eb-19b2-f7c7b57a7b00
 md"""
 ## Configuration of the Recommender
@@ -107,7 +104,9 @@ Let's we are organizing a data leverage campaign, and have some set of resources
 Threads.@threads for lever_size in [0, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95]
 	for lever_genre in ["All", "Comedy", "Action", "Drama"]
 	for lever_type in ["strike", "poison"]
-		outname = "results/d=$embedding_dim,trn=$epochs-$learning_rate-$regularization-$n_negatives,frac=$frac,lever=$lever_size-$lever_genre-$lever_type"
+		name= "d=$embedding_dim,trn=$epochs-$learning_rate-$regularization-$n_negatives,frac=$frac,lever=$lever_size-$lever_genre-$lever_type"
+		outname = "results/$name.csv"
+		model_filename = "models/$outname.jld"
 		print(outname, "\n")
 		#results = CSV.read(outname, DataFrame)
 		if isfile(outname)
@@ -115,7 +114,7 @@ Threads.@threads for lever_size in [0, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 
 		else
 			results = main(
 				epochs=epochs, lever_size=lever_size, frac=frac,
-				lever_genre=lever_genre, outname=outname
+				lever_genre=lever_genre, outname=outname, model_filename="$outname."
 			)
 		end
 		cols = ["lever_size", "n_train", "lever_genre", "hr", "hr_Action", "hr_Comedy", "hr_Drama"]
@@ -164,7 +163,6 @@ p2 = plot(
 
 # ╔═╡ Cell order:
 # ╠═ed417ac0-7d71-11eb-3433-2bb5d1bde552
-# ╠═17541050-807b-11eb-23d7-dfc900345c4d
 # ╠═a9045180-7bbd-11eb-334b-d9a2fc106895
 # ╠═c8f6e970-803c-11eb-1044-833a5c296b23
 # ╠═b81173a0-7d71-11eb-05de-252115b9905c
