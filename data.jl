@@ -105,28 +105,30 @@ function load_custom(
 
     #do strike here
     if lever.size > 0
-        if lever.genre != "All"
+        if lever.genre != "All" # GENRE SPECIFIC
             elig_observations = item_df[item_df[:, lever.genre], "orig_item"]
+            # use the ORIG ITEM id. We'll check against the orig_item column below in `mask =`` 
             n_obs = size(elig_observations, 1)
-            print(lever.genre, n_obs, "\n")
+            #print(lever.genre, n_obs, "\n")
             n_drop = Int(floor(lever.size * n_obs))
 
-            print("$lever.genre, $n_obs, $n_drop\n")
+            #print("$lever.genre, $n_obs, $n_drop\n")
 
+            obs_at_stake = shuffle(elig_observations)[1:n_drop]
             if lever.type == "strike"
-                drop = shuffle(elig_observations)[1:n_drop]
-
-                mask = [!(x in drop) for x in df.orig_item]
+                mask = [!(x in obs_at_stake) for x in df.orig_item]
                 df = df[mask, :]
             elseif lever.type == "poison"
-                mask = shuffle(elig_observations)[1:n_drop]
-                df[mask, :item] = rand(unique(df.item))
-
-                #mask = [!(x in drop) for x in df.orig_item]
-                df = df[mask, :]
+                mask = [x in obs_at_stake for x in df.orig_item]
+                if lever.genre2 != false
+                    elig_switches = unique(item_df[item_df[:, lever.genre], "item"]) # as the NEW item id
+                else
+                    elig_switches = unique(df.item)
+                end
+                df[mask, :item] = rand(elig_switches, sum(mask))
             end
 
-        else
+        else # NOT GENRE SPECIFIC
             n_orig_users = length(unique(df.orig_user))
             elig_users = 1:n_orig_users
             n_lever_users = Int(floor(lever.size * n_orig_users))
@@ -141,7 +143,8 @@ function load_custom(
             if lever.type == "strike"
                 df = df[.!mask, :]
             elseif lever.type == "poison"
-                df[mask, :item] = rand(unique(df.item))
+                elig_switches = unique(df.item)
+                df[mask, :item] = rand(elig_switches, sum(mask))
                 df = df[mask, :]
             end
         end
