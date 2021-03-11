@@ -206,7 +206,7 @@ end
 # stdev = 0.1
 # frac = 1.0
 # lever_size = 0
-# lever_genre = ""
+# lever_genre = "All"
 # lever_type = "strike"
 # learning_rate = 0.01
 # regularization = 0.005
@@ -260,7 +260,7 @@ function main(;
     print(config, "\n")
 
     # init the model. Embeddings are drawn from normal, biases start at zero.
-    if load_model
+    if load_model && isfile(model_filename)
         d = load(model_filename)
         model = d["model"]
     else
@@ -282,7 +282,7 @@ function main(;
     records = []
     for epoch=model.epoch:config.epochs
         model.epoch = epoch
-        if epoch % 10 == 0
+        if epoch == 1 || epoch % 10 == 0 || epoch == config.epochs
             save(model_filename, "model", model)
         end
         record = Dict{Any,Any}("epoch"=>epoch, "n_train"=>n_train, "lever_size"=>lever_size, "lever_genre"=>lever_genre)

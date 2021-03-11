@@ -100,13 +100,22 @@ Let's we are organizing a data leverage campaign, and have some set of resources
 
 """
 
+# ╔═╡ f4823870-81e9-11eb-210b-e5c941042875
+#Threads.@threads for lever_size in [0, 0.05]
+if length(ARGS) > 0
+	lever_sizes = [parse(Float64, ARGS[1])]
+else
+	lever_sizes = [0.01, 0.02, 0.03, 0.06, 0.1, 0.2, 0.3, 0.4, 0.5]
+end
+
 # ╔═╡ 13f3bfd0-7d71-11eb-3275-e5bde57f6cc9
-Threads.@threads for lever_size in [0, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95]
+
+for lever_size in lever_sizes
 	for lever_genre in ["All", "Comedy", "Action", "Drama"]
-	for lever_type in ["strike", "poison"]
+	for lever_type in ["strike"]
 		name= "d=$embedding_dim,trn=$epochs-$learning_rate-$regularization-$n_negatives,frac=$frac,lever=$lever_size-$lever_genre-$lever_type"
 		outname = "results/$name.csv"
-		model_filename = "models/$outname.jld"
+		model_filename = "models/$name.jld"
 		print(outname, "\n")
 		#results = CSV.read(outname, DataFrame)
 		if isfile(outname)
@@ -114,7 +123,8 @@ Threads.@threads for lever_size in [0, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 
 		else
 			results = main(
 				epochs=epochs, lever_size=lever_size, frac=frac,
-				lever_genre=lever_genre, outname=outname, model_filename="$outname."
+				lever_genre=lever_genre, lever_type=lever_type, outname=outname, 
+				model_filename=model_filename
 			)
 		end
 		cols = ["lever_size", "n_train", "lever_genre", "hr", "hr_Action", "hr_Comedy", "hr_Drama"]
@@ -176,6 +186,7 @@ p2 = plot(
 # ╠═41a525a0-803b-11eb-0638-25d23fb54f96
 # ╠═32898b00-803c-11eb-28bf-85936aaf4b8f
 # ╠═23e13020-8033-11eb-3052-7ba5a9019aad
+# ╠═f4823870-81e9-11eb-210b-e5c941042875
 # ╠═13f3bfd0-7d71-11eb-3275-e5bde57f6cc9
 # ╠═291a54a0-7d71-11eb-0489-1bed3e39ca1c
 # ╠═876beb20-8039-11eb-18dd-a543b3797128
