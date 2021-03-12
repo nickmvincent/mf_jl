@@ -93,9 +93,9 @@ Let's we are organizing a data leverage campaign, and have some set of resources
 if length(ARGS) > 0
 	lever_sizes = [parse(Float64, ARGS[1])]
 else
-	#lever_sizes = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+	lever_sizes = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
 	#lever_sizes = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06,]
-	lever_sizes = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
+	#lever_sizes = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
 end
 
 # ╔═╡ f307cb00-8279-11eb-3a90-3d5b5775d487
@@ -105,7 +105,7 @@ nice_dfs = []
 
 for lever_size in lever_sizes
 	for lever_genre in ["All", "Comedy", "Action", "Drama"]
-	for lever_type in ["poison"]
+	for lever_type in ["strike", "poison"]
 		name= "d=$embedding_dim,trn=$epochs-$learning_rate-$regularization-$n_negatives,frac=$frac,lever=$lever_size-$lever_genre-$lever_type"
 		outname = "results/$name.csv"
 		model_filename = "models/$name.jld"
@@ -176,14 +176,15 @@ CSV.write("stacked_emojis.csv", stacked_emojis)
 
 # ╔═╡ a17259de-8035-11eb-0ed7-2f65f80a7131
 p1 = plot(
-	stacked, x=:lever_size, y=:value, color=:lever_genre, xgroup=:variable,
-	Geom.subplot_grid(Geom.point,  Geom.line)
+	stacked, x=:lever_size, y=:value, color=:lever_genre, xgroup=:variable, shape=:lever_type,
+	Geom.subplot_grid(Geom.point)
 )
 
 # ╔═╡ d0c34a10-803a-11eb-36be-ff456de81a52
 p2 = plot(
 	stacked, x="Observations Lost", y=:value, color=:lever_genre, xgroup=:variable,
-	Geom.subplot_grid(Geom.point,  Geom.line)
+	shape=:lever_type,
+	Geom.subplot_grid(Geom.point)
 )
 
 # ╔═╡ 15d9e580-8051-11eb-1f96-cb30074ec481
