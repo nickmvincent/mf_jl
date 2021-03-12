@@ -145,7 +145,6 @@ function load_custom(
             elseif lever.type == "poison"
                 elig_switches = unique(df.item)
                 df[mask, :item] = rand(elig_switches, sum(mask))
-                df = df[mask, :]
             end
         end
     end
