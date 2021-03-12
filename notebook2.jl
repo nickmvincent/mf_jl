@@ -75,18 +75,6 @@ Some notes
 * we'll use just 20 epochs and set frac to 0.1 so our experiments don't take too long. This means we use only 10% of total data as the "maximum" data and show our mode the training data just 20 times. This means our maximum accuracy wil be lower than the "State of Art", but we can still show the general trends.
 """
 
-# ╔═╡ 921ebc80-7e0b-11eb-0ee7-43707e956e9a
-nice_dfs = []
-
-# ╔═╡ 85dab1e0-803b-11eb-06a5-0782aee168c5
-item_filename, delim = "ml-1m/movies.dat", "::"
-
-# ╔═╡ 41a525a0-803b-11eb-0638-25d23fb54f96
-item_df, all_genres = get_item_df(item_filename, delim)
-
-# ╔═╡ 32898b00-803c-11eb-28bf-85936aaf4b8f
-names(item_df)
-
 # ╔═╡ 23e13020-8033-11eb-3052-7ba5a9019aad
 md"""
 # Data Lever Parameters
@@ -105,14 +93,19 @@ Let's we are organizing a data leverage campaign, and have some set of resources
 if length(ARGS) > 0
 	lever_sizes = [parse(Float64, ARGS[1])]
 else
-	lever_sizes = [0.01, 0.02, 0.03, 0.06, 0.1, 0.2, 0.3, 0.4, 0.5]
+	#lever_sizes = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+	#lever_sizes = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06,]
+	lever_sizes = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
 end
+
+# ╔═╡ f307cb00-8279-11eb-3a90-3d5b5775d487
+nice_dfs = []
 
 # ╔═╡ 13f3bfd0-7d71-11eb-3275-e5bde57f6cc9
 
 for lever_size in lever_sizes
 	for lever_genre in ["All", "Comedy", "Action", "Drama"]
-	for lever_type in ["strike"]
+	for lever_type in ["poison"]
 		name= "d=$embedding_dim,trn=$epochs-$learning_rate-$regularization-$n_negatives,frac=$frac,lever=$lever_size-$lever_genre-$lever_type"
 		outname = "results/$name.csv"
 		model_filename = "models/$name.jld"
@@ -127,7 +120,12 @@ for lever_size in lever_sizes
 				model_filename=model_filename
 			)
 		end
-		cols = ["lever_size", "n_train", "lever_genre", "hr", "hr_Action", "hr_Comedy", "hr_Drama"]
+		cols = [
+			"lever_size", "n_train", "lever_genre", "lever_type",
+			"hr", "hr_Action", "hr_Comedy", "hr_Drama"
+			#"hits_Action", "hits_Comedy", "hits_Drama"
+		]
+		results[:, "lever_type"] .= lever_type
 		nice = results[end, cols]
 
 		push!(nice_dfs, nice)
@@ -141,31 +139,51 @@ nice_df = DataFrame(vcat(nice_dfs...));
 # ╔═╡ 876beb20-8039-11eb-18dd-a543b3797128
 size(nice_df)
 
-# ╔═╡ 1b62b630-8038-11eb-1827-a1a9bef09c2c
-nice_df_filled = coalesce.(nice_df, "Any");
+# ╔═╡ 9d59ec40-8276-11eb-20d0-7feb17f82e6b
+nice_df
 
 # ╔═╡ 296cb3c0-8079-11eb-3b6f-11a1eaad14c5
-max_train = maximum(nice_df_filled.n_train)
+max_train = maximum(nice_df.n_train)
 
 # ╔═╡ 318fadf0-8079-11eb-18cf-3ddb1ece2e02
-nice_df_filled[:, "Observations Lost"] = max_train .- nice_df_filled.n_train
+nice_df[:, "Observations Lost"] = max_train .- nice_df.n_train
+
+# ╔═╡ c625e22e-8278-11eb-2c1d-21291a620125
+cols_to_stack = ["hr", "hr_Action", "hr_Comedy", "hr_Drama"]
+#cols_to_stack = ["hits_Action", "hits_Comedy", "hits_Drama"]
 
 # ╔═╡ f064368e-803a-11eb-2caa-15eabf7b7f19
-stacked = stack(nice_df_filled, ["hr", "hr_Action", "hr_Comedy", "hr_Drama"])
+stacked = stack(nice_df, cols_to_stack)
 
 # ╔═╡ 429b1530-8079-11eb-2245-59f35fcbc9c3
-CSV.write("nice_df_filled.csv", nice_df_filled)
+CSV.write("nice_df.csv", nice_df)
+
+# ╔═╡ 714aaace-8277-11eb-0250-0b848eb41d8b
+CSV.write("stacked.csv", stacked)
+
+# ╔═╡ c55d6ca0-8279-11eb-0a0c-61297f33c369
+stacked_emojis = copy(stacked)
+
+# ╔═╡ 248e2b10-827a-11eb-34ea-45417691123f
+stacked_emojis.variable = replace(
+	stacked.variable, "hr_Drama" => "🎭", "hr_Comedy"=>"😂", "hr_Action"=>"🤜")
+
+# ╔═╡ 03dba780-827a-11eb-289e-53cbc509bd14
+stacked_emojis
+
+# ╔═╡ 0c543bc0-827a-11eb-3e3a-fd04c395ee92
+CSV.write("stacked_emojis.csv", stacked_emojis)
 
 # ╔═╡ a17259de-8035-11eb-0ed7-2f65f80a7131
 p1 = plot(
 	stacked, x=:lever_size, y=:value, color=:lever_genre, xgroup=:variable,
-	Geom.subplot_grid(Geom.point)
+	Geom.subplot_grid(Geom.point,  Geom.line)
 )
 
 # ╔═╡ d0c34a10-803a-11eb-36be-ff456de81a52
 p2 = plot(
 	stacked, x="Observations Lost", y=:value, color=:lever_genre, xgroup=:variable,
-	Geom.subplot_grid(Geom.point)
+	Geom.subplot_grid(Geom.point,  Geom.line)
 )
 
 # ╔═╡ 15d9e580-8051-11eb-1f96-cb30074ec481
@@ -181,20 +199,23 @@ p2 = plot(
 # ╟─aac56cd0-807b-11eb-07f2-dbe74e4276ee
 # ╟─b62409fe-807b-11eb-37e1-7fd2e79dbcaa
 # ╠═cdcb5d70-8053-11eb-1337-c7b88699aad1
-# ╠═921ebc80-7e0b-11eb-0ee7-43707e956e9a
-# ╠═85dab1e0-803b-11eb-06a5-0782aee168c5
-# ╠═41a525a0-803b-11eb-0638-25d23fb54f96
-# ╠═32898b00-803c-11eb-28bf-85936aaf4b8f
 # ╠═23e13020-8033-11eb-3052-7ba5a9019aad
 # ╠═f4823870-81e9-11eb-210b-e5c941042875
+# ╠═f307cb00-8279-11eb-3a90-3d5b5775d487
 # ╠═13f3bfd0-7d71-11eb-3275-e5bde57f6cc9
 # ╠═291a54a0-7d71-11eb-0489-1bed3e39ca1c
 # ╠═876beb20-8039-11eb-18dd-a543b3797128
-# ╠═1b62b630-8038-11eb-1827-a1a9bef09c2c
+# ╠═9d59ec40-8276-11eb-20d0-7feb17f82e6b
 # ╠═296cb3c0-8079-11eb-3b6f-11a1eaad14c5
 # ╠═318fadf0-8079-11eb-18cf-3ddb1ece2e02
+# ╠═c625e22e-8278-11eb-2c1d-21291a620125
 # ╠═f064368e-803a-11eb-2caa-15eabf7b7f19
 # ╠═429b1530-8079-11eb-2245-59f35fcbc9c3
+# ╠═714aaace-8277-11eb-0250-0b848eb41d8b
+# ╠═c55d6ca0-8279-11eb-0a0c-61297f33c369
+# ╠═248e2b10-827a-11eb-34ea-45417691123f
+# ╠═03dba780-827a-11eb-289e-53cbc509bd14
+# ╠═0c543bc0-827a-11eb-3e3a-fd04c395ee92
 # ╠═a17259de-8035-11eb-0ed7-2f65f80a7131
 # ╠═d0c34a10-803a-11eb-36be-ff456de81a52
 # ╠═15d9e580-8051-11eb-1f96-cb30074ec481

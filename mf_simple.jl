@@ -215,6 +215,7 @@ end
 struct Lever
     size::Float64
     genre::Any
+    genre2::Any
     type::Any
 end
 
@@ -229,7 +230,8 @@ function main(;
     item_filename = "ml-1m/movies.dat"
     delim = "::"
     strat = "leave_out_last"
-    lever = Lever(lever_size, lever_genre, lever_type)
+    genre2 = false
+    lever = Lever(lever_size, lever_genre, genre2, lever_type)
     train_df, test_hits_df, test_negatives, n_users, n_items, items, all_genres = load_custom(
         filename, lever, delim=delim, strat=strat, frac=frac, item_filename=item_filename
     )
