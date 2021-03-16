@@ -58,14 +58,12 @@ function parse_commandline()
         "--lever_genre"
             help = "Genre the lever will target"
 		"--dataset"
+			default = "ml-1m"
 			help="Which dataset? Supported: ml-1m|ml-25m|"
 		"--epochs"
 			default = 100
 			arg_type = Int
 			help="how many epochs?"
-		"--dataset"
-			default = "ml-1m"
-			help="Which dataset?"
     end
 
     return parse_args(s)
