@@ -59,6 +59,8 @@ function parse_commandline()
             help = "Genre the lever will target"
 		"--dataset"
 			help="Which dataset? Supported: ml-1m|ml-25m|"
+		"--epochs"
+			default = 100
     end
 
     return parse_args(s)
@@ -138,6 +140,7 @@ function set_args()
 	else
 		lever_genres = [parsed_args["lever_genre"]]
 	end
+
 	return lever_sizes, lever_types, lever_genres
 end
 
@@ -148,7 +151,7 @@ lever_sizes, lever_types, lever_genres = set_args()
 nice_dfs = []
 
 # ╔═╡ e02cb1d0-85ee-11eb-37e6-43344bf8d5ba
-epochs = 1
+epochs = parsed_args["epochs"]
 
 # ╔═╡ 13f3bfd0-7d71-11eb-3275-e5bde57f6cc9
 
