@@ -222,12 +222,19 @@ function main(;
     epochs=20, embedding_dim=16, stdev=0.1,
     frac=1.0, lever_size=0, lever_genre="All", lever_type="strike",
     learning_rate=0.002, regularization=0.005, n_negatives = 8, outname="out",
-    k = 10, model_filename="", load_model=false
+    k = 10, model_filename="", load_model=false, dataset="ml-1m"
 )
     #"ml-100k/u.data"
-    filename = "ml-1m/ratings.dat"
-    item_filename = "ml-1m/movies.dat"
-    delim = "::"
+    if dataset == "ml-1m"
+        filename = "ml-1m/ratings.dat"
+        item_filename = "ml-1m/movies.dat"
+        delim = "::"
+    elseif dataset == "ml-1m"
+        filename = "ml-25m/ratings.csv"
+        item_filename = "ml-25m/movies.csv"
+        delim = ","
+    end
+    
     strat = "leave_out_last"
     genre2 = false
     lever = Lever(lever_size, lever_genre, genre2, lever_type)

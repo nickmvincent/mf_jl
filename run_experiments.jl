@@ -61,6 +61,11 @@ function parse_commandline()
 			help="Which dataset? Supported: ml-1m|ml-25m|"
 		"--epochs"
 			default = 100
+			arg_type = Int
+			help="how many epochs?"
+		"--dataset"
+			default = "ml-1m"
+			help="Which dataset?"
     end
 
     return parse_args(s)
@@ -168,7 +173,7 @@ for lever_size in lever_sizes
 			results = main(
 				epochs=epochs, lever_size=lever_size, frac=frac,
 				lever_genre=lever_genre, lever_type=lever_type, outname=outname, 
-				model_filename=model_filename
+				model_filename=model_filename, dataset=parsed_args["dataset"]
 			)
 		end
 		cols = [
@@ -176,7 +181,7 @@ for lever_size in lever_sizes
 			"hr", "hr_Action", "hr_Comedy", "hr_Drama"
 			#"hits_Action", "hits_Comedy", "hits_Drama"
 		]
-		#results[:, "lever_type"] .= lever_type
+		results[:, "lever_type"] .= lever_type
 		nice = results[end, cols]
 
 		push!(nice_dfs, nice)
