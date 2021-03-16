@@ -124,15 +124,14 @@ function fit!(model::MfModel, config::Config, train::Matrix{Int})
     # format the training data and shuffle (to avoid cycles)
     triplets = convert_implicit_triplets(n_items, train, config.n_negatives)
     shuffled_transposed = triplets[:, shuffle(1:end)]
-    
 
-    ΣL = 0.0 # summed loss
+    ΣL = 0.0 # summed loss. Not actually used, just printed for debugging.
 
     λ = config.λ # for reference: regularization
     η = config.η # for reference: learning rate
 
     # SGD loop
-    # TODO minibatch + parallelize?
+    # (MAYBE) TODO minibatch and/or parallelize?
     n_examples = size(shuffled_transposed, 2)
     for i = 1:n_examples
         user, item, y = shuffled_transposed[:, i]
@@ -250,7 +249,6 @@ function main(;
 
     # config for training the recsys
     λ = regularization
-    
     η = learning_rate
 
     # embedding_dim - 1 is used because the user and item biases are one of the dimensions
@@ -287,7 +285,11 @@ function main(;
         if epoch == 1 || epoch % 10 == 0 || epoch == config.epochs
             save(model_filename, "model", model)
         end
-        record = Dict{Any,Any}("epoch"=>epoch, "n_train"=>n_train, "lever_size"=>lever_size, "lever_genre"=>lever_genre)
+        record = Dict{Any,Any}(
+            "epoch"=>epoch, "n_train"=>n_train, 
+            "lever_size"=>lever_size, "lever_genre"=>lever_genre,
+            "lever_type"=>lever_type
+        )
         record["epoch"] = epoch
         #print(train[1:10, :], "\n|")
         # == Fit ==
