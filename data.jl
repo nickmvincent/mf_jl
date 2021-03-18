@@ -84,14 +84,12 @@ function load_custom(
     hidden_hits[:, "user"] = map(get_user, hidden_hits.orig_user)
     hidden_hits[:, "item"] = map(get_item, hidden_hits.orig_item)
     hidden_negatives = map(get_item, hidden_negatives)
-
-    
     
     n_items = length(unique(df.item))
     n_users = length(unique(df.user))
 
 
-    #Toss some data to train faster
+    # Here, we can toss some data to train faster, e.g. for testing
 
     if frac != 1.0
         n_rows = size(df)[1]
@@ -103,7 +101,7 @@ function load_custom(
     item_df, all_genres = get_item_df(item_filename, delim)
     item_df[:, "item"] = map(get_item, item_df.orig_item)
 
-    #do strike here
+    # do strike here
     if lever.size > 0
         if lever.genre != "All" # GENRE SPECIFIC
             elig_observations = item_df[item_df[:, lever.genre], "orig_item"]
@@ -155,7 +153,6 @@ function load_custom(
     #     train = df[1:num_train, cols]
     #     test = df[num_train:end, cols]
 
-    #else
     cols = ["user", "item", "hit"]
 
     return df[:, cols], hidden_hits[:, cols], hidden_negatives, n_users, n_items, item_df, all_genres

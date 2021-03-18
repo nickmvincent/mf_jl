@@ -64,6 +64,8 @@ function parse_commandline()
 			default = 100
 			arg_type = Int
 			help="how many epochs?"
+		"--outdir"
+			default = "results"
     end
 
     return parse_args(s)
@@ -162,7 +164,8 @@ for lever_size in lever_sizes
 	for lever_genre in lever_genres
 	for lever_type in lever_types
 		name= "d=$embedding_dim,trn=$epochs-$learning_rate-$regularization-$n_negatives,frac=$frac,lever=$lever_size-$lever_genre-$lever_type"
-		outname = "results/$name.csv"
+		outdir = parsed_args["outdir"]
+		outname = "$outdir/$name.csv"
 		model_filename = "models/$name.jld"
 		print(outname, "\n")
 		if isfile(outname)
