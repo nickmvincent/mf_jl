@@ -129,7 +129,7 @@ We have to make choices about three "parameters" that describe our campaign
 #Threads.@threads for lever_size in [0, 0.05]
 function set_args()
 	if isnothing(parsed_args["lever_size"])
-		lever_sizes = [0.0, 0.05, 0.1]
+		lever_sizes = [ 0.05, 0.1]
 	else
 		lever_sizes = [parsed_args["lever_size"]]
 	end

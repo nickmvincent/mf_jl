@@ -229,7 +229,7 @@ function main(;
         filename = "ml-1m/ratings.dat"
         item_filename = "ml-1m/movies.dat"
         delim = "::"
-    elseif dataset == "ml-1m"
+    elseif dataset == "ml-25m"
         filename = "ml-25m/ratings.csv"
         item_filename = "ml-25m/movies.csv"
         delim = ","
