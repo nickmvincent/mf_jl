@@ -1,7 +1,7 @@
 using CSV, DataFrames, Printf, Random
 
-function get_item_df(item_filename, delim)
-    item_df = CSV.read(item_filename, DataFrame, delim=delim, header=["orig_item", "name", "genres"])
+function get_item_df(item_filename, delim, datarow=1)
+    item_df = CSV.read(item_filename, DataFrame, datarow=datarow, delim=delim, header=["orig_item", "name", "genres"])
     genre_arrs = [split(x, '|') for x in item_df.genres]
     all_genres = []
     for genre_arr in genre_arrs
@@ -18,7 +18,11 @@ end
 function load_custom(
     filename, lever; delim="\t", strat="leave_out_last", frac=1.0, item_filename=""
 )
-    df = CSV.read(filename, DataFrame, delim=delim, header=["orig_user", "orig_item", "rating", "utc"])
+    datarow = 1
+    if delim == ","
+        datarow=2
+    end
+    df = CSV.read(filename, DataFrame, delim=delim, datarow=datarow, header=["orig_user", "orig_item", "rating", "utc"])
     # can implement a hit threshold here.
     # currently we copy NCF and use ALL Ratings as hit
     df[:, "hit"] = df.rating .>= 0
@@ -28,7 +32,7 @@ function load_custom(
     This will be used for testing.
     ==#
     df = sort(df, [:orig_user, :utc])
-    num_negatives_per_user = 100
+    num_negatives_per_user = 10000
     df[:, "is_test"] = fill(false, size(df)[1])
     hidden_negatives = zeros(length(unique(df.orig_user)), num_negatives_per_user)
     all_items = unique(df.orig_item)
@@ -98,7 +102,7 @@ function load_custom(
     end
 
     
-    item_df, all_genres = get_item_df(item_filename, delim)
+    item_df, all_genres = get_item_df(item_filename, delim, datarow)
     item_df[:, "item"] = map(get_item, item_df.orig_item)
 
     # do strike here
