@@ -32,7 +32,7 @@ struct TrainingConfig
 end
 
 struct DataLoadingConfig
-    num_test_negatives_per_user::Int
+    n_test_negatives::Int
     cutoff::Any
     dataset::Any
     frac::Float64
@@ -229,10 +229,11 @@ end
 
 
 function main(;
-    data_loading_config::DataLoadingConfig, training_config::TrainingConfig,
+    data_loading_config::DataLoadingConfig,
+    trn_config::TrainingConfig,
     lever::Lever,
     outname="out",
-    k = 10, model_filename="", load_model=false, dataset="ml-1m",
+    k = 10, model_filename="", load_model=false
 )
     #"ml-100k/u.data"
     if data_loading_config.dataset == "ml-1m"
@@ -271,9 +272,9 @@ function main(;
         d = load(model_filename)
         model = d["model"]
     else
-        dist = Normal(0, config.stdev)
-        u_emb = rand(dist, config.embedding_dim, n_users)
-        i_emb = rand(dist, config.embedding_dim, n_items)
+        dist = Normal(0, trn_config.stdev)
+        u_emb = rand(dist, trn_config.embedding_dim, n_users)
+        i_emb = rand(dist, trn_config.embedding_dim, n_items)
         u_b = zeros(n_users)
         i_b = zeros(n_items)
         bias = 0.0
@@ -287,21 +288,21 @@ function main(;
     print("HR: $rand_hr | NDCG: $rand_ndcg\n")
 
     records = []
-    for epoch=model.epoch:config.epochs
+    for epoch=model.epoch:trn_config.epochs
         model.epoch = epoch
-        if epoch == 1 || epoch % 10 == 0 || epoch == config.epochs
+        if epoch == 1 || epoch % 10 == 0 || epoch == trn_config.epochs
             save(model_filename, "model", model)
         end
         record = Dict{Any,Any}(
             "epoch"=>epoch, "n_train"=>n_train, 
-            "lever_size"=>lever_size, "lever_genre"=>lever_genre,
-            "lever_type"=>lever_type
+            "lever_size"=>lever.size, "lever_genre"=>lever.genre,
+            "lever_type"=>lever.type
         )
         record["epoch"] = epoch
         #print(train[1:10, :], "\n|")
         # == Fit ==
         t_start_fit = time()
-        mean_loss = fit!(model, config, train)
+        mean_loss = fit!(model, trn_config, train)
         time_elapsed = time() - t_start_fit
         record["time_elapsed"] = time_elapsed
         # == Evaluate ==

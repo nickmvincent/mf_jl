@@ -1,4 +1,4 @@
-using CSV, DataFrames, Printf, Random
+using CSV, DataFrames, Printf, Random, Dates
 
 function get_item_df(item_filename, delim, datarow=1)
     item_df = CSV.read(item_filename, DataFrame, datarow=datarow, delim=delim, header=["orig_item", "name", "genres"])
@@ -29,37 +29,38 @@ Modifies df and return hidden negatives and hidden hits
 
 This replicates evaluation fron Neural Collaborative Filtering etc.
 """
-function leave_out_test!(df::DataFrame, num_negatives_per_user::Any=100, cutoff=false)
+function leave_out_test!(df::DataFrame, n_test_negatives::Any=100, cutoff=false)
     sort!(df, [:orig_user, :utc])
     df[:, "is_test"] = fill(false, size(df)[1])
-    if !cutoff
-        hidden_negatives = zeros(length(unique(df.orig_user)), num_negatives_per_user)
+    n_users = length(unique(df.orig_user))
+    if n_test_negatives == 0
+        hidden_negatives = [[] for x in 1:n_users]
     else
-        hidden_negatives = []
+        hidden_negatives = zeros(n_users, n_test_negatives)
     end
     all_items = unique(df.orig_item)
 
     for group in groupby(df, :orig_user)
-        if !cutoff
+        if cutoff == false
             group[end, "is_test"] = true
             seen_items = group[1:end-1, "orig_item"]
         else
-            cutoff_utc = unix2timestamp(cutoff)
+            cutoff_utc = datetime2unix(DateTime(cutoff))
             #df[:, "do_drop"] = fill(false, size(df)[1])
-            after_cutoff_mask = group.utc > cutoff_utc
+            after_cutoff_mask = group.utc .> cutoff_utc
             #after_cutoff = group[after_cutoff, :]
             #after_cutoff[1, "is_test"] = true
             #after_cutoff[2:end, "do_drop"] = true
-            group[after_cutoff_mask, "is_test"] = true
+            group[after_cutoff_mask, "is_test"] .= true
 
             seen_items = group[.!after_cutoff_mask, "orig_item"]
         end
         
         unseen_items = setdiff(all_items, seen_items)
-        if num_negatives_per_user == "all"
-            hidden_negatives[group[1, "orig_user"], :] = shuffle(unseen_items)[1:end]
+        if n_test_negatives == 0
+            hidden_negatives[group[1, "orig_user"]] = shuffle(unseen_items)[1:end]
         else
-            hidden_negatives[group[1, "orig_user"], :] = shuffle(unseen_items)[1:num_negatives_per_user]
+            hidden_negatives[group[1, "orig_user"], :] = shuffle(unseen_items)[1:n_test_negatives]
         end
     end
 
@@ -115,10 +116,10 @@ function renumber!(df, item_df, hidden_hits, hidden_negatives)
     return map(get_item, hidden_negatives)
 end
 
-function toss_data!(df, frac)
+function toss_data(df, frac)
     n_rows = size(df)[1]
     new_n_rows = Int(floor(n_rows * frac))
-    df = df[shuffle(1:end)[1:new_n_rows], :]
+    return df[shuffle(1:end)[1:new_n_rows], :]
 end
 
 function sample_frac_users(df, col, frac)
@@ -182,14 +183,14 @@ function load_custom(
     
     # Here, we can toss some data to train faster, e.g. for testing
     if config.frac != 1.0
-        toss_data!(df, config.frac)
+        df = toss_data(df, config.frac)
     end
 
     # currently we copy NCF and use ALL Ratings as hit
     assign_hits!(df)
 
     # leave-one-out data splitting
-    hidden_negatives, hidden_hits = leave_out_test!(df, config.num_test_negatives_per_user, cutoff=config.utoff)
+    hidden_negatives, hidden_hits = leave_out_test!(df, config.n_test_negatives, config.cutoff)
 
     # get item info (e.g. movie genres)
     item_df, all_genres = get_item_df(item_filename, delim, datarow)

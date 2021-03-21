@@ -62,7 +62,7 @@ function parse_commandline()
 		    default = "ml-1m"
 			help="Which dataset? Supported: ml-1m|ml-25m|"
 		"--n_test_negatives"
-			default = 100
+			default = 0
 			arg_type = Int
 		"--cutoff"
 			default = false
@@ -91,8 +91,7 @@ function parse_commandline()
 			default = 0.005
 			arg_type = Float64
 		"--n_trn_negatives"
-			default = 0.005
-			arg_type = Float64
+			default = 8
 		"--stdev"
 			default = 0.1
 			arg_type = Float64
@@ -125,8 +124,9 @@ A brief description of our configuration:
 """
 
 # ╔═╡ c5e179d0-7dd0-11eb-18a1-95b44b195b59
-embedding_dim, learning_rate, regularization, n_training_negatives, stddev = (
-	parsed_args["embedding"], parsed_args["learning_rate", parsed_args["regularization"], parsed_args["n_trn_negatives"],
+embedding_dim, learning_rate, regularization, n_trn_negatives, stdev = (
+	parsed_args["embedding_dim"], parsed_args["learning_rate"], 
+	parsed_args["regularization"], parsed_args["n_trn_negatives"],
 	parsed_args["stdev"]
 )
 
@@ -200,25 +200,26 @@ for lever_size in lever_sizes
 	frac = parsed_args["frac"]
 	for lever_genre in lever_genres
 	for lever_type in lever_types
+		dataset = parsed_args["dataset"]
 		dataset_str = "$dataset"
 		if frac != 1.0
 			dataset_str = "$frac-of-$dataset"
 		end
 		lever_str = "$lever_type-$lever_genre-$lever_size"
-		name= "$dataset_str/$lever_str/$d=$embedding_dim,trn=$epochs-$learning_rate-$regularization-$n_negatives_training"
+		name= "$dataset_str/$lever_str/$epochs-$embedding_dim-$learning_rate-$regularization-$n_trn_negatives"
 		outdir = parsed_args["outdir"]
 		outname = "$outdir/$name.csv"
 		model_filename = "models/$name.jld"
 		print(outname, "\n")
 
-		load_conf = DataLoadingConfig(
+		load_config = DataLoadingConfig(
 			parsed_args["n_test_negatives"], parsed_args["cutoff"],
 			parsed_args["dataset"], parsed_args["frac"]
 		)
 		genre2 = false # not yet implemented
     	lever = Lever(lever_size, lever_genre, genre2, lever_type)
 		
-		trn_conf = TrainingConfig(
+		trn_config = TrainingConfig(
 			epochs, embedding_dim - 1, # because bias is one of the dimensions
 			regularization, n_trn_negatives, 
 			learning_rate, stdev
@@ -227,7 +228,9 @@ for lever_size in lever_sizes
 			results = CSV.read(outname, DataFrame)
 		else
 			results = main(
-				load_conf, trn_conf, lever,
+				data_loading_config=load_config,
+				trn_config=trn_config, 
+				lever=lever,
 				outname=outname, 
 				model_filename=model_filename
 			)
