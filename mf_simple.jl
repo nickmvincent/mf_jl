@@ -14,13 +14,28 @@ function write_output(res, name)
     CSV.write("$name", res)
 end
 
-struct Config
+struct Lever
+    size::Float64
+    genre::Any
+    genre2::Any
+    type::Any
+end
+
+struct TrainingConfig
     epochs::Int # number of epochs to train for
     embedding_dim::Int # embedding dim
     λ::Float64 # regularization
     n_negatives::Int # number of of negative samples per pos
     η::Float64 # learning rate
     stdev::Float64 # standard dev for init
+
+end
+
+struct DataLoadingConfig
+    num_test_negatives_per_user::Int
+    cutoff::Any
+    dataset::Any
+    frac::Float64
 end
 
 mutable struct MfModel
@@ -119,7 +134,7 @@ end
 """
 fit the model with SGD
 """
-function fit!(model::MfModel, config::Config, train::Matrix{Int})
+function fit!(model::MfModel, config::TrainingConfig, train::Matrix{Int})
     n_items = size(model.i_emb, 2)
     # format the training data and shuffle (to avoid cycles)
     triplets = convert_implicit_triplets(n_items, train, config.n_negatives)
@@ -169,7 +184,7 @@ function evaluate(model::MfModel, test_hits::Matrix{Int}, test_negatives::Matrix
     ndcgs = []
     for col in 1:size(test_hits, 2)
         triplet_col = test_hits[:, col]
-        negatives_col = test_negatives[:, col]
+        negatives_col = test_negatives[:, triplet_col[1]]
         hit, ndcg = eval_one_rating(model, triplet_col, negatives_col, k)
         append!(hits, hit)
         append!(ndcgs, ndcg)
@@ -211,35 +226,31 @@ end
 # regularization = 0.005
 # n_negatives = 8
 
-struct Lever
-    size::Float64
-    genre::Any
-    genre2::Any
-    type::Any
-end
+
 
 function main(;
-    epochs=20, embedding_dim=16, stdev=0.1,
-    frac=1.0, lever_size=0, lever_genre="All", lever_type="strike",
-    learning_rate=0.002, regularization=0.005, n_negatives = 8, outname="out",
-    k = 10, model_filename="", load_model=false, dataset="ml-1m"
+    data_loading_config::DataLoadingConfig, training_config::TrainingConfig,
+    lever::Lever,
+    outname="out",
+    k = 10, model_filename="", load_model=false, dataset="ml-1m",
 )
     #"ml-100k/u.data"
-    if dataset == "ml-1m"
+    if data_loading_config.dataset == "ml-1m"
         filename = "ml-1m/ratings.dat"
         item_filename = "ml-1m/movies.dat"
         delim = "::"
-    elseif dataset == "ml-25m"
+        datarow = 1
+    elseif data_loading_config.dataset == "ml-25m"
         filename = "ml-25m/ratings.csv"
         item_filename = "ml-25m/movies.csv"
         delim = ","
+        datarow = 2 
     end
-    
-    strat = "leave_out_last"
-    genre2 = false
-    lever = Lever(lever_size, lever_genre, genre2, lever_type)
+        
     train_df, test_hits_df, test_negatives, n_users, n_items, items, all_genres = load_custom(
-        filename, lever, delim=delim, strat=strat, frac=frac, item_filename=item_filename
+        data_loading_config,
+        filename, lever, delim=delim,
+        item_filename=item_filename, datarow=datarow
     )
 
     # transpose everything so we can access by column
@@ -254,17 +265,6 @@ function main(;
     n_test = size(test_hits, 2)
     print("n_users: $n_users, n_items: $n_items, n_train: $n_train, num_test: $n_test \n")
 
-    # config for training the recsys
-    λ = regularization
-    η = learning_rate
-
-    # embedding_dim - 1 is used because the user and item biases are one of the dimensions
-    config = Config(
-        epochs, embedding_dim - 1,
-        λ, n_negatives, 
-        η, stdev
-    )
-    print(config, "\n")
 
     # init the model. Embeddings are drawn from normal, biases start at zero.
     if load_model && isfile(model_filename)
@@ -326,8 +326,8 @@ function main(;
             #print("$genre $genre_hr|")
         end 
         push!(records, record)
-        
     end
+
     results = DataFrame(records[1])
     for record in records[2:end]
         push!(results, record)

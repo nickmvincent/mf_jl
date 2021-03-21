@@ -7,6 +7,12 @@ using InteractiveUtils
 # ╔═╡ e8ff5b3e-8045-11eb-0f2e-2170e77dc8ed
 using Random, StatsBase, CSV, DataFrames
 
+# ╔═╡ 8db46596-89dc-11eb-2669-cbce26886f2c
+using Dates
+
+# ╔═╡ a708a466-89dd-11eb-0459-fb71ad79b832
+using Plots
+
 # ╔═╡ 5ab98ade-8045-11eb-1b16-c7163c589b09
 include("./mf_simple.jl")
 
@@ -35,7 +41,48 @@ strat = "leave_out_last"
 end
 
 # ╔═╡ 9aa33ca0-8045-11eb-0ea8-95b75e358290
-lever = Lever(lever_size, lever_genre, lever_type)
+lever = Lever(lever_size, lever_genre, false, lever_type)
+
+# ╔═╡ 201d4260-89db-11eb-326a-d19ee95faf8f
+df = CSV.read("ml-1m/ratings.dat", DataFrame, delim="::", datarow=1, header=["orig_user", "orig_item", "rating", "utc"])
+
+
+# ╔═╡ bc56699e-89dc-11eb-1500-2173e403fbc5
+dates = map(Dates.unix2datetime, df.utc)
+
+# ╔═╡ 68b73b24-89e1-11eb-1bd4-d7b716969e94
+years = [Dates.Year(x) for x in dates]
+
+# ╔═╡ 9e935934-89dd-11eb-3034-871304ba7ec7
+
+
+# ╔═╡ 8b9f946e-89dd-11eb-049d-77e2e927c0ff
+histogram(df.utc)
+
+# ╔═╡ 0d1fc848-89f8-11eb-3fd8-d5bb4e4c17a8
+arr = df.utc
+
+# ╔═╡ 1790a998-89f9-11eb-23de-fb5ed829b082
+
+
+# ╔═╡ d02dd3ea-89f9-11eb-247e-95ae88d85108
+quantile(arr, (1:10) ./10)
+
+# ╔═╡ 2aeba2f8-89fa-11eb-04d1-a17ad52b13b8
+unix2datetime(quantile(arr, 0.9))
+
+# ╔═╡ 02ec7200-89fa-11eb-10a2-e9ede72ae730
+(1:10) ./10
+
+# ╔═╡ 220b3e20-89f8-11eb-040a-ff3c16f34944
+gcdf = ecdf(arr)
+
+
+# ╔═╡ 55d43ca6-89f4-11eb-15bd-553e6f2bcb7c
+plot(x -> gcdf(x), minimum(arr), maximum(arr))
+
+# ╔═╡ 44562588-89f8-11eb-2ffb-23a95fd5a305
+
 
 # ╔═╡ 8c2a6720-8045-11eb-1437-8f8f047397da
 train, test_hits, test_negatives, n_users, n_items, items, all_genres = load_custom(
@@ -115,6 +162,21 @@ tmp2[:, ["epoch", "hr"]]
 # ╠═cacc56a0-8045-11eb-00e1-4fa676705ed7
 # ╠═9aa33ca0-8045-11eb-0ea8-95b75e358290
 # ╠═e8ff5b3e-8045-11eb-0f2e-2170e77dc8ed
+# ╠═8db46596-89dc-11eb-2669-cbce26886f2c
+# ╠═201d4260-89db-11eb-326a-d19ee95faf8f
+# ╠═bc56699e-89dc-11eb-1500-2173e403fbc5
+# ╠═68b73b24-89e1-11eb-1bd4-d7b716969e94
+# ╠═9e935934-89dd-11eb-3034-871304ba7ec7
+# ╠═a708a466-89dd-11eb-0459-fb71ad79b832
+# ╠═8b9f946e-89dd-11eb-049d-77e2e927c0ff
+# ╠═0d1fc848-89f8-11eb-3fd8-d5bb4e4c17a8
+# ╠═1790a998-89f9-11eb-23de-fb5ed829b082
+# ╠═d02dd3ea-89f9-11eb-247e-95ae88d85108
+# ╠═2aeba2f8-89fa-11eb-04d1-a17ad52b13b8
+# ╠═02ec7200-89fa-11eb-10a2-e9ede72ae730
+# ╠═220b3e20-89f8-11eb-040a-ff3c16f34944
+# ╠═55d43ca6-89f4-11eb-15bd-553e6f2bcb7c
+# ╠═44562588-89f8-11eb-2ffb-23a95fd5a305
 # ╠═8c2a6720-8045-11eb-1437-8f8f047397da
 # ╠═c9cb1e10-8218-11eb-0025-531cd3f2aece
 # ╠═1d2c26a0-821c-11eb-2f5f-7ba9393fb171

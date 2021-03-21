@@ -48,24 +48,57 @@ function parse_commandline()
     s = ArgParseSettings()
 
     @add_arg_table s begin
+		# lever args
         "--lever_size"
             help = "What fraction of users join the action?"
 			arg_type = Float64
         "--lever_type"
             help = "Poison or strike?"
-            #arg_type = Int
-            #default = 0
         "--lever_genre"
             help = "Genre the lever will target"
+		
+		# Data Loading Args
 		"--dataset"
-			default = "ml-1m"
+		    default = "ml-1m"
 			help="Which dataset? Supported: ml-1m|ml-25m|"
+		"--n_test_negatives"
+			default = 100
+			arg_type = Int
+		"--cutoff"
+			default = false
+			help = "use a strict global timeline cutoff for test train split"
+		"--frac"
+			default = 1.0
+			arg_type = Float64
+		
+
+		# saving args
+		"--outdir"
+			default = "results"
+
+		# training
 		"--epochs"
 			default = 100
 			arg_type = Int
 			help="how many epochs?"
-		"--outdir"
-			default = "results"
+		"--embedding_dim"
+			default = 16
+			arg_type = Int
+		"--learning_rate"
+			default = 0.002
+			arg_type = Float64
+		"--regularization"
+			default = 0.005
+			arg_type = Float64
+		"--n_trn_negatives"
+			default = 0.005
+			arg_type = Float64
+		"--stdev"
+			default = 0.1
+			arg_type = Float64
+		"--load_model"
+			default = false
+		
     end
 
     return parse_args(s)
@@ -92,8 +125,9 @@ A brief description of our configuration:
 """
 
 # ╔═╡ c5e179d0-7dd0-11eb-18a1-95b44b195b59
-embedding_dim, frac, learning_rate, regularization, n_negatives = (
-	16, 1.0, 0.002, 0.005, 8
+embedding_dim, learning_rate, regularization, n_training_negatives, stddev = (
+	parsed_args["embedding"], parsed_args["learning_rate", parsed_args["regularization"], parsed_args["n_trn_negatives"],
+	parsed_args["stdev"]
 )
 
 # ╔═╡ b62409fe-807b-11eb-37e1-7fd2e79dbcaa
@@ -103,16 +137,18 @@ embedding_dim, frac, learning_rate, regularization, n_negatives = (
 md"""
 Some notes
 
-* we'll use just 20 epochs and set frac to 0.1 so our experiments don't take too long. 
-This means we use only 10% of total data as the "maximum" data and show our model the
-training data just 20 times. 
-This means our maximum accuracy wil be lower than the "State of Art",
+* we'll use a consistent number of epochs.
+
+We can set `frac` to something below 1.0 so experiments don't take as long. 
+# This means we use only 10% of total data as the "maximum" data and show our model the
+# training data just 20 times. 
+Using lower epochs and frac means our maximum accuracy wil be lower than the "State of Art",
 but we can still show the general trends.
 """
 
 # ╔═╡ 23e13020-8033-11eb-3052-7ba5a9019aad
 md"""
-# Data Lever Parameters
+# Configuration of the Data Lever
 
 Imagine we are organizing a data leverage campaign,
 and have some set of resources (funds, social capital, etc.)
@@ -129,7 +165,7 @@ We have to make choices about three "parameters" that describe our campaign
 #Threads.@threads for lever_size in [0, 0.05]
 function set_args()
 	if isnothing(parsed_args["lever_size"])
-		lever_sizes = [ 0.05, 0.1]
+		lever_sizes = [0.0]
 	else
 		lever_sizes = [parsed_args["lever_size"]]
 	end
@@ -141,7 +177,7 @@ function set_args()
 	end
 
 	if isnothing(parsed_args["lever_genre"])
-		lever_genres = ["All", "Comedy", "Action", "Drama"]
+		lever_genres = ["All", "Comedy", "Action"]
 	else
 		lever_genres = [parsed_args["lever_genre"]]
 	end
@@ -161,20 +197,39 @@ epochs = parsed_args["epochs"]
 # ╔═╡ 13f3bfd0-7d71-11eb-3275-e5bde57f6cc9
 
 for lever_size in lever_sizes
+	frac = parsed_args["frac"]
 	for lever_genre in lever_genres
 	for lever_type in lever_types
-		name= "d=$embedding_dim,trn=$epochs-$learning_rate-$regularization-$n_negatives,frac=$frac,lever=$lever_size-$lever_genre-$lever_type"
+		dataset_str = "$dataset"
+		if frac != 1.0
+			dataset_str = "$frac-of-$dataset"
+		end
+		lever_str = "$lever_type-$lever_genre-$lever_size"
+		name= "$dataset_str/$lever_str/$d=$embedding_dim,trn=$epochs-$learning_rate-$regularization-$n_negatives_training"
 		outdir = parsed_args["outdir"]
 		outname = "$outdir/$name.csv"
 		model_filename = "models/$name.jld"
 		print(outname, "\n")
+
+		load_conf = DataLoadingConfig(
+			parsed_args["n_test_negatives"], parsed_args["cutoff"],
+			parsed_args["dataset"], parsed_args["frac"]
+		)
+		genre2 = false # not yet implemented
+    	lever = Lever(lever_size, lever_genre, genre2, lever_type)
+		
+		trn_conf = TrainingConfig(
+			epochs, embedding_dim - 1, # because bias is one of the dimensions
+			regularization, n_trn_negatives, 
+			learning_rate, stdev
+		)
 		if isfile(outname)
 			results = CSV.read(outname, DataFrame)
 		else
 			results = main(
-				epochs=epochs, lever_size=lever_size, frac=frac,
-				lever_genre=lever_genre, lever_type=lever_type, outname=outname, 
-				model_filename=model_filename, dataset=parsed_args["dataset"]
+				load_conf, trn_conf, lever,
+				outname=outname, 
+				model_filename=model_filename
 			)
 		end
 		cols = [
@@ -182,7 +237,7 @@ for lever_size in lever_sizes
 			"hr", "hr_Action", "hr_Comedy", "hr_Drama"
 			#"hits_Action", "hits_Comedy", "hits_Drama"
 		]
-		results[:, "lever_type"] .= lever_type
+		#results[:, "lever_type"] .= lever_type
 		nice = results[end, cols]
 
 		push!(nice_dfs, nice)
