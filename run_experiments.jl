@@ -73,8 +73,13 @@ function parse_commandline()
 		
 
 		# saving args
-		"--outdir"
+		"--outroot"
 			default = "results"
+		"--load_results"
+			action = :store_true
+		# saving args
+		# "--modeldir"
+		# 	default = "models"
 
 		# training
 		"--epochs"
@@ -96,7 +101,8 @@ function parse_commandline()
 			default = 0.1
 			arg_type = Float64
 		"--load_model"
-			default = false
+			action = :store_true
+		
 		
     end
 
@@ -173,7 +179,7 @@ function set_args()
 	if isnothing(parsed_args["lever_type"])
 		lever_types = ["strike", "poison"]
 	else
-		lever_types = [parsed_args["lever_size"]]
+		lever_types = [parsed_args["lever_type"]]
 	end
 
 	if isnothing(parsed_args["lever_genre"])
@@ -206,11 +212,22 @@ for lever_size in lever_sizes
 			dataset_str = "$frac-of-$dataset"
 		end
 		lever_str = "$lever_type-$lever_genre-$lever_size"
-		name= "$dataset_str/$lever_str/$epochs-$embedding_dim-$learning_rate-$regularization-$n_trn_negatives"
-		outdir = parsed_args["outdir"]
-		outname = "$outdir/$name.csv"
-		model_filename = "models/$name.jld"
-		print(outname, "\n")
+		outroot = parsed_args["outroot"]
+		#modeldir = parsed_args["modeldir"]
+		n_test_negatives, cutoff, frac = (
+			parsed_args["n_test_negatives"], parsed_args["cutoff"], parsed_args["frac"]
+		)
+		datasplit_str = "$n_test_negatives-$cutoff-$frac"
+		model_str = "$embedding_dim-$learning_rate-$regularization-$n_trn_negatives"
+		outpath = "$outroot/$dataset_str/$datasplit_str/$lever_str/$model_str"
+		#model_path = "$modeldir/$dataset_str/$lever_str"
+		mkpath(outpath)
+		#mkpath(model_path)
+
+		
+		resultsname = "$outpath/$epochs.csv"
+		modelname = "$outpath/$epochs.jld"
+		print(resultsname, "\n")
 
 		load_config = DataLoadingConfig(
 			parsed_args["n_test_negatives"], parsed_args["cutoff"],
@@ -224,15 +241,14 @@ for lever_size in lever_sizes
 			regularization, n_trn_negatives, 
 			learning_rate, stdev
 		)
-		if isfile(outname)
-			results = CSV.read(outname, DataFrame)
+		if parsed_args["load_results"] && isfile(resultsname)
+			results = CSV.read(resultsname, DataFrame)
 		else
 			results = main(
-				data_loading_config=load_config,
-				trn_config=trn_config, 
+				load_config, trn_config, outpath,
 				lever=lever,
-				outname=outname, 
-				model_filename=model_filename
+				load_model=parsed_args["load_model"],
+				modelname=modelname
 			)
 		end
 		cols = [

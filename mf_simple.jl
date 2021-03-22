@@ -185,6 +185,7 @@ function evaluate(model::MfModel, test_hits::Matrix{Int}, test_negatives::Matrix
     for col in 1:size(test_hits, 2)
         triplet_col = test_hits[:, col]
         negatives_col = test_negatives[:, triplet_col[1]]
+        negatives_col = [x for x in negatives_col if x != 0]
         hit, ndcg = eval_one_rating(model, triplet_col, negatives_col, k)
         append!(hits, hit)
         append!(ndcgs, ndcg)
@@ -207,6 +208,10 @@ function eval_one_rating(model::MfModel, triplet::Vector{Int}, negatives::Vector
         d[item] = preds[i]
     end
 
+    if k > length(values(d))
+        k = length(values(d))
+    end
+    # print(items, "\n")
     topk = sort(collect(zip(values(d),keys(d))), rev=true)[1:k]
 
     hr_at_k = get_hr(topk, target)
@@ -228,12 +233,12 @@ end
 
 
 
-function main(;
+function main(
     data_loading_config::DataLoadingConfig,
     trn_config::TrainingConfig,
+    outpath::String;
     lever::Lever,
-    outname="out",
-    k = 10, model_filename="", load_model=false
+    k::Int = 10, load_model=false, modelname=""
 )
     #"ml-100k/u.data"
     if data_loading_config.dataset == "ml-1m"
@@ -268,9 +273,11 @@ function main(;
 
 
     # init the model. Embeddings are drawn from normal, biases start at zero.
-    if load_model && isfile(model_filename)
-        d = load(model_filename)
+    if load_model && isfile(modelname)
+        print(modelname, "\n")
+        d = load(modelname)
         model = d["model"]
+        print("loading at epoch ", model.epoch, "\n")
     else
         dist = Normal(0, trn_config.stdev)
         u_emb = rand(dist, trn_config.embedding_dim, n_users)
@@ -278,20 +285,23 @@ function main(;
         u_b = zeros(n_users)
         i_b = zeros(n_items)
         bias = 0.0
-        epoch = 1
-        model = MfModel(u_emb, i_emb, u_b, i_b, bias, epoch)
+        model = MfModel(u_emb, i_emb, u_b, i_b, bias, 1)
     end
     
-    rand_hits, rand_ndcgs = evaluate(model, test_hits, test_negatives, k)
-    rand_hr = mean(rand_hits)
-    rand_ndcg = mean(rand_ndcgs)
+    init_hits, init_ndcgs = evaluate(model, test_hits, test_negatives, k)
+    rand_hr = mean(init_hits)
+    rand_ndcg = mean(init_ndcgs)
     print("HR: $rand_hr | NDCG: $rand_ndcg\n")
 
     records = []
     for epoch=model.epoch:trn_config.epochs
         model.epoch = epoch
         if epoch == 1 || epoch % 10 == 0 || epoch == trn_config.epochs
-            save(model_filename, "model", model)
+            cur_modelname = "$outpath/$epoch.jld"
+            cur_resultsname = "$outpath/$epoch.csv"
+            save(cur_modelname, "model", model)
+            #write_output(DataFrame(record), cur_resultsname)
+            #save("$outname-$epoch", "record", record)
         end
         record = Dict{Any,Any}(
             "epoch"=>epoch, "n_train"=>n_train, 
@@ -299,23 +309,25 @@ function main(;
             "lever_type"=>lever.type
         )
         record["epoch"] = epoch
-        #print(train[1:10, :], "\n|")
+
         # == Fit ==
         t_start_fit = time()
         mean_loss = fit!(model, trn_config, train)
-        time_elapsed = time() - t_start_fit
-        record["time_elapsed"] = time_elapsed
+        record["fit_time_elapsed"] = time() - t_start_fit
         # == Evaluate ==
+        t_start_eval = time()
         hits, ndcgs = evaluate(model, test_hits, test_negatives, k)
         hr = mean(hits)
         ndcg = mean(ndcgs)
+        record["eval_time_elapsed"] =  time() - t_start_eval
+
         record["hr"] = hr
         record["ndcg"] = ndcg
         record["loss"] = mean_loss
 
-        round4 = x -> round(x, digits=4)
-        s1, s2, s3, s4 = map(round4, [hr, ndcg, mean_loss, time_elapsed])
-        print("$epoch:\t HR: $s1, NDCG: $s2, TrainL: $s3, Time: $s4\n")
+        round5 = x -> round(x, digits=5)
+        s1, s2, s3, s4, s5 = map(round5, [hr, ndcg, mean_loss, record["fit_time_elapsed"], record["eval_time_elapsed"]])
+        print("$epoch:\t HR: $s1, NDCG: $s2, TrainL: $s3, Times: $s4, $s5\n")
         for genre in all_genres
             matches = items[items[:, genre], "item"]
             mask = [x in matches for x in test_hits_df.item]
@@ -327,12 +339,15 @@ function main(;
             #print("$genre $genre_hr|")
         end 
         push!(records, record)
+        
     end
 
     results = DataFrame(records[1])
     for record in records[2:end]
         push!(results, record)
     end
-    write_output(results, outname)
+    epoch = model.epoch
+    final_outname = "$outpath/$epoch-final.csv"
+    write_output(results, final_outname)
     return results
 end

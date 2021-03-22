@@ -34,7 +34,7 @@ function leave_out_test!(df::DataFrame, n_test_negatives::Any=100, cutoff=false)
     df[:, "is_test"] = fill(false, size(df)[1])
     n_users = length(unique(df.orig_user))
     if n_test_negatives == 0
-        hidden_negatives = [[] for x in 1:n_users]
+        hidden_negatives = zeros(n_users, length(unique(df.orig_item)))
     else
         hidden_negatives = zeros(n_users, n_test_negatives)
     end
@@ -58,7 +58,8 @@ function leave_out_test!(df::DataFrame, n_test_negatives::Any=100, cutoff=false)
         
         unseen_items = setdiff(all_items, seen_items)
         if n_test_negatives == 0
-            hidden_negatives[group[1, "orig_user"]] = shuffle(unseen_items)[1:end]
+            #push!(hidden_negatives, shuffle(unseen_items)[1:end])
+            hidden_negatives[group[1, "orig_user"], 1:length(unseen_items)] = shuffle(unseen_items)[1:end]
         else
             hidden_negatives[group[1, "orig_user"], :] = shuffle(unseen_items)[1:n_test_negatives]
         end
