@@ -102,7 +102,8 @@ function parse_commandline()
 			arg_type = Float64
 		"--load_model"
 			action = :store_true
-		
+		"--load_model_name"
+		    default = ""		
 		
     end
 
@@ -171,7 +172,7 @@ We have to make choices about three "parameters" that describe our campaign
 #Threads.@threads for lever_size in [0, 0.05]
 function set_args()
 	if isnothing(parsed_args["lever_size"])
-		lever_sizes = [0.0]
+		lever_sizes = (1:20) .* 0.05
 	else
 		lever_sizes = [parsed_args["lever_size"]]
 	end
@@ -217,16 +218,24 @@ for lever_size in lever_sizes
 		n_test_negatives, cutoff, frac = (
 			parsed_args["n_test_negatives"], parsed_args["cutoff"], parsed_args["frac"]
 		)
-		datasplit_str = "$n_test_negatives-$cutoff-$frac"
+		datasplit_str = "$n_test_negatives-$cutoff"
+
+		
 		model_str = "$embedding_dim-$learning_rate-$regularization-$n_trn_negatives"
 		outpath = "$outroot/$dataset_str/$datasplit_str/$lever_str/$model_str"
 		#model_path = "$modeldir/$dataset_str/$lever_str"
 		mkpath(outpath)
+		mkpath("$outpath/topk")
 		#mkpath(model_path)
 
 		
 		resultsname = "$outpath/$epochs.csv"
-		modelname = "$outpath/$epochs.jld"
+		if load_model_name != ""
+			modelname = parsed_args["load_model_name"]
+		else
+			modelname = "$outpath/$epochs.jld"
+		end
+		
 		print(resultsname, "\n")
 
 		load_config = DataLoadingConfig(
