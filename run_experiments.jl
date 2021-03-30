@@ -229,7 +229,7 @@ for lever_size in lever_sizes
 		#mkpath(model_path)
 
 		
-		resultsname = "$outpath/$epochs.csv"
+		resultsname = "$outpath/$epochs-final.csv"
 		if parsed_args["load_model_n_test_negatives"] != ""
 			n2 = parsed_args["load_model_n_test_negatives"]
 			datasplit_str2 = "$n2-$cutoff"
