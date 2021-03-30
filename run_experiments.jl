@@ -102,7 +102,7 @@ function parse_commandline()
 			arg_type = Float64
 		"--load_model"
 			action = :store_true
-		"--load_model_name"
+		"--load_model_n_test_negatives"
 		    default = ""		
 		
     end
@@ -230,8 +230,11 @@ for lever_size in lever_sizes
 
 		
 		resultsname = "$outpath/$epochs.csv"
-		if load_model_name != ""
-			modelname = parsed_args["load_model_name"]
+		if parsed_args["load_model_n_test_negatives"] != ""
+			n2 = parsed_args["load_model_n_test_negatives"]
+			datasplit_str2 = "$n2-$cutoff"
+			outpath2 = "$outroot/$dataset_str/$datasplit_str2/$lever_str/$model_str"
+			modelname = "$outpath2/$epochs.jld"
 		else
 			modelname = "$outpath/$epochs.jld"
 		end
