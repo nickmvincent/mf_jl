@@ -157,20 +157,15 @@ function targeted_lever!(df, item_df, lever)
     end
 end
 
-function general_lever!(df, item_df, lever)
+function general_lever(df, item_df, lever)
     lever_users = sample_frac_users(df, :user, lever.size)
     mask = [(x in lever_users) for x in df.user]
 
-    if lever.genre != "All"
-        matching_observations = item_df[item_df[:, lever.genre], "item"]
-        mask = [x in matching_observations for x in df.item] .& mask
-    end
-
     if lever.type == "strike"
-        df = df[.!mask, :]
+        return df[.!mask, :]
     elseif lever.type == "poison"
         elig_switches = unique(df.item)
-        df[mask, :item] = rand(elig_switches, sum(mask))
+        return df[mask, :item] = rand(elig_switches, sum(mask))
     end
 end
 
@@ -208,7 +203,7 @@ function load_custom(
         if lever.genre != "All"
             targeted_lever!(df, item_df, lever)
         else
-            general_lever!(df, item_df, lever)
+            df = general_lever(df, item_df, lever)
         end
     end
 
