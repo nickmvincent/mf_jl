@@ -45,6 +45,7 @@ mutable struct MfModel
     i_b::Vector{Float64} # item biases
     b::Float64 # global bias
     epoch::Int #keep track of how many epochs the model has been trained
+    outpath::String # where to write files?
 end
 
 """
@@ -179,21 +180,31 @@ end
 evalute the recommender model using "leave last out" (holdout LAST hit item + 100 random negatives)
 based on this code/paper: https://github.com/hexiangnan/neural_collaborative_filtering/blob/master/evaluate.py
 """
-function evaluate(model::MfModel, test_hits::Matrix{Int}, test_negatives::Matrix{Int}, k::Int)
+function evaluate(
+    model::MfModel, test_hits::Matrix{Int},
+    test_negatives::Matrix{Int}, k::Int;
+    print_users=[]
+)
+
     hits = []
     ndcgs = []
     for col in 1:size(test_hits, 2)
         triplet_col = test_hits[:, col]
         negatives_col = test_negatives[:, triplet_col[1]]
+        # drop the zeros (no item)
         negatives_col = [x for x in negatives_col if x != 0]
-        hit, ndcg = eval_one_rating(model, triplet_col, negatives_col, k)
+        save_topk = false
+        if triplet_col[1] in print_users
+            save_topk = true
+        end
+        hit, ndcg = eval_one_rating(model, triplet_col, negatives_col, k, save_topk=save_topk)
         append!(hits, hit)
         append!(ndcgs, ndcg)
     end
     return hits, ndcgs
 end
 
-function eval_one_rating(model::MfModel, triplet::Vector{Int}, negatives::Vector{Int}, k::Int)
+function eval_one_rating(model::MfModel, triplet::Vector{Int}, negatives::Vector{Int}, k::Int; save_topk=false)
     items = copy(negatives)
     user, target, hit = triplet
 
@@ -213,6 +224,10 @@ function eval_one_rating(model::MfModel, triplet::Vector{Int}, negatives::Vector
     end
     # print(items, "\n")
     topk = sort(collect(zip(values(d),keys(d))), rev=true)[1:k]
+    if save_topk
+        dest = "$(model.outpath)/topk/$user.jld"
+        save(dest, "topk", topk)
+    end
 
     hr_at_k = get_hr(topk, target)
     ndcg_at_ak = get_ndcg(topk, target)
@@ -240,7 +255,6 @@ function main(
     lever::Lever,
     k::Int = 10, load_model=false, modelname=""
 )
-    #"ml-100k/u.data"
     if data_loading_config.dataset == "ml-1m"
         filename = "ml-1m/ratings.dat"
         item_filename = "ml-1m/movies.dat"
@@ -285,7 +299,7 @@ function main(
         u_b = zeros(n_users)
         i_b = zeros(n_items)
         bias = 0.0
-        model = MfModel(u_emb, i_emb, u_b, i_b, bias, 1)
+        model = MfModel(u_emb, i_emb, u_b, i_b, bias, 1, outpath)
     end
     
     init_hits, init_ndcgs = evaluate(model, test_hits, test_negatives, k)
@@ -316,18 +330,21 @@ function main(
         record["fit_time_elapsed"] = time() - t_start_fit
         # == Evaluate ==
         t_start_eval = time()
-        hits, ndcgs = evaluate(model, test_hits, test_negatives, k)
+        rand_users = shuffle(1:n_users)[1:3]
+        hits, ndcgs = evaluate(model, test_hits, test_negatives, k, print_users=rand_users)
         hr = mean(hits)
         ndcg = mean(ndcgs)
         record["eval_time_elapsed"] =  time() - t_start_eval
-
         record["hr"] = hr
         record["ndcg"] = ndcg
         record["loss"] = mean_loss
 
+        # == Print and Save to Dict ==
         round5 = x -> round(x, digits=5)
         s1, s2, s3, s4, s5 = map(round5, [hr, ndcg, mean_loss, record["fit_time_elapsed"], record["eval_time_elapsed"]])
         print("$epoch:\t HR: $s1, NDCG: $s2, TrainL: $s3, Times: $s4, $s5\n")
+        
+        # == Genre Specific Scores ==
         for genre in all_genres
             matches = items[items[:, genre], "item"]
             mask = [x in matches for x in test_hits_df.item]
@@ -338,6 +355,11 @@ function main(
             record["ndcg_$genre"] = genre_ndcg
             #print("$genre $genre_hr|")
         end 
+
+        # == Example Users == 
+        #rand_users = shuffle(1:n_users)[1:3]
+
+
         push!(records, record)
         
     end
