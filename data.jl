@@ -132,7 +132,7 @@ function sample_frac_users(df, col, frac)
     return sample
 end
 
-function targeted_lever!(df, item_df, lever)
+function targeted_lever(df, item_df, lever)
     lever_users = sample_frac_users(df, :user, lever.size)
 
     # figure out which items might be "up for grabs" (to delete or poison)
@@ -155,6 +155,7 @@ function targeted_lever!(df, item_df, lever)
         # randomly pick n_affected switched and apply them using "mask"
         df[matching_obs_mask, :item] = rand(elig_switches, sum(matching_obs_mask))
     end
+    return df
 end
 
 function general_lever(df, item_df, lever)
@@ -201,7 +202,7 @@ function load_custom(
     # do the deletion / modification
     if lever.size > 0
         if lever.genre != "All"
-            targeted_lever!(df, item_df, lever)
+            df = targeted_lever(df, item_df, lever)
         else
             df = general_lever(df, item_df, lever)
         end
