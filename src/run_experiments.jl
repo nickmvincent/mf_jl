@@ -172,7 +172,7 @@ We have to make choices about three "parameters" that describe our campaign
 #Threads.@threads for lever_size in [0, 0.05]
 function set_args()
 	if isnothing(parsed_args["lever_size"])
-		lever_sizes = (1:20) .* 0.05
+		lever_sizes = (1:19) .* 0.05
 	else
 		lever_sizes = [parsed_args["lever_size"]]
 	end
@@ -299,10 +299,10 @@ cols_to_stack = ["hr", "hr_Action", "hr_Comedy", "hr_Drama"]
 stacked = stack(nice_df, cols_to_stack)
 
 # ╔═╡ 429b1530-8079-11eb-2245-59f35fcbc9c3
-CSV.write("agg-results/nice_df.csv", nice_df)
+CSV.write("$outpath/nice_df.csv", nice_df)
 
 # ╔═╡ 714aaace-8277-11eb-0250-0b848eb41d8b
-CSV.write("agg-results/stacked.csv", stacked)
+CSV.write("$outpath/stacked.csv", stacked)
 
 # ╔═╡ c55d6ca0-8279-11eb-0a0c-61297f33c369
 stacked_emojis = copy(stacked)
@@ -315,7 +315,7 @@ stacked_emojis.variable = replace(
 stacked_emojis
 
 # ╔═╡ 0c543bc0-827a-11eb-3e3a-fd04c395ee92
-CSV.write("agg-results/stacked_emojis.csv", stacked_emojis)
+CSV.write("$outpath/stacked_emojis.csv", stacked_emojis)
 
 # ╔═╡ a17259de-8035-11eb-0ed7-2f65f80a7131
 p1 = plot(
