@@ -202,7 +202,6 @@ nice_dfs = []
 epochs = parsed_args["epochs"]
 
 # ╔═╡ 13f3bfd0-7d71-11eb-3275-e5bde57f6cc9
-
 for lever_size in lever_sizes
 	frac = parsed_args["frac"]
 	for lever_genre in lever_genres
@@ -223,11 +222,10 @@ for lever_size in lever_sizes
 		
 		model_str = "$embedding_dim-$learning_rate-$regularization-$n_trn_negatives"
 		outpath = "$outroot/$dataset_str/$datasplit_str/$lever_str/$model_str"
-		#model_path = "$modeldir/$dataset_str/$lever_str"
 		mkpath(outpath)
 		mkpath("$outpath/topk")
-		#mkpath(model_path)
 
+		
 		
 		resultsname = "$outpath/$epochs-final.csv"
 		if parsed_args["load_model_n_test_negatives"] != ""
@@ -299,6 +297,7 @@ cols_to_stack = ["hr", "hr_Action", "hr_Comedy", "hr_Drama"]
 stacked = stack(nice_df, cols_to_stack)
 
 # ╔═╡ 429b1530-8079-11eb-2245-59f35fcbc9c3
+outpath = "$(parsed_args["outroot"])/$(parsed_args["dataset"])"
 CSV.write("$outpath/nice_df.csv", nice_df)
 
 # ╔═╡ 714aaace-8277-11eb-0250-0b848eb41d8b
