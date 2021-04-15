@@ -166,7 +166,8 @@ function general_lever(df, item_df, lever)
         return df[.!mask, :]
     elseif lever.type == "poison"
         elig_switches = unique(df.item)
-        return df[mask, :item] = rand(elig_switches, sum(mask))
+        df[mask, :item] = rand(elig_switches, sum(mask))
+        return df
     end
 end
 
