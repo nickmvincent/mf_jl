@@ -126,7 +126,7 @@ function sample_frac_users(df, col, frac)
     return sample
 end
 
-function targeted_lever(df, item_df, lever_users)
+function targeted_lever(df, lever, lever_users, item_df)
     # figure out which items might be "up for grabs" (to delete or poison)
     elig_items = item_df[item_df[:, lever.genre], "item"]
 
@@ -150,7 +150,7 @@ function targeted_lever(df, item_df, lever_users)
     return df
 end
 
-function general_lever(df, lever_users)
+function general_lever(df, lever, lever_users)
     mask = [(x in lever_users) for x in df.user]
 
     if lever.type == "strike"
@@ -209,9 +209,9 @@ function load_custom(
     participants = sample_frac_users(df, :user, lever.size)
     if lever.size > 0
         if lever.genre != "All"
-            df = targeted_lever(df, item_df, participants)
+            df = targeted_lever(df, lever, participants, item_df)
         else
-            df = general_lever(df, participants)
+            df = general_lever(df, lever, participants)
         end
         
     end
