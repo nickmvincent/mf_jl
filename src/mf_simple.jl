@@ -267,7 +267,7 @@ function main(
         datarow = 2 
     end
         
-    train_df, test_hits_df, test_negatives, n_users, n_items, items, all_genres = load_custom(
+    train_df, test_hits_df, test_negatives, subj_hits_df, subj_negatives, n_users, n_items, items, all_genres = load_custom(
         data_loading_config,
         filename, lever, delim=delim,
         item_filename=item_filename, datarow=datarow
@@ -278,12 +278,17 @@ function main(
     my_convert = x -> copy(transpose(convert(Matrix{Int}, x)))
 
     train = my_convert(train_df[:, ["user", "item"]])
+    # TODO: could change the name of test_hits. It's a little confusing considered that hits is a metric.
     test_hits = my_convert(test_hits_df)
     test_negatives = my_convert(test_negatives)
 
+    subj_hits = my_convert(subj_hits_df)
+    subj_negatives = my_convert(subj_negatives)    
+
     n_train = size(train, 2)
     n_test = size(test_hits, 2)
-    print("n_users: $n_users, n_items: $n_items, n_train: $n_train, num_test: $n_test \n")
+    n_subj = size(subj_hits, 2)
+    print("n_users: $n_users, n_items: $n_items, n_train: $n_train, n_test: $n_test, n_subj: $n_subj \n")
 
 
     # init the model. Embeddings are drawn from normal, biases start at zero.
@@ -305,17 +310,16 @@ function main(
     init_hits, init_ndcgs = evaluate(model, test_hits, test_negatives, k)
     rand_hr = mean(init_hits)
     rand_ndcg = mean(init_ndcgs)
-    print("HR: $rand_hr | NDCG: $rand_ndcg\n")
+    print("Starting eval: HR: $rand_hr | NDCG: $rand_ndcg\n")
 
     records = []
     for epoch=model.epoch:trn_config.epochs
         model.epoch = epoch
+        # print on 1, 10, 20, ... last.
         if epoch == 1 || epoch % 10 == 0 || epoch == trn_config.epochs
             cur_modelname = "$outpath/$epoch.jld"
             cur_resultsname = "$outpath/$epoch.csv"
             save(cur_modelname, "model", model)
-            #write_output(DataFrame(record), cur_resultsname)
-            #save("$outname-$epoch", "record", record)
         end
         record = Dict{Any,Any}(
             "epoch"=>epoch, "n_train"=>n_train, 
@@ -331,12 +335,18 @@ function main(
         # == Evaluate ==
         t_start_eval = time()
         rand_users = shuffle(1:n_users)[1:3]
-        hits, ndcgs = evaluate(model, test_hits, test_negatives, k, print_users=rand_users)
-        hr = mean(hits)
+        hits_metric, ndcgs = evaluate(model, test_hits, test_negatives, k, print_users=rand_users)
+        subj_hits_metric, subj_ndcgs = evaluate(model, subj_hits, subj_negatives, k)
+        hr = mean(hits_metric)
         ndcg = mean(ndcgs)
+        subj_hr = mean(subj_hits_metric)
+        subj_ndcg = mean(subj_ndcgs)
+
         record["eval_time_elapsed"] =  time() - t_start_eval
         record["hr"] = hr
         record["ndcg"] = ndcg
+        record["subj_hr"] = subj_hr
+        record["subj_ndcg"] = subj_ndcg
         record["loss"] = mean_loss
 
         # == Print and Save to Dict ==
@@ -348,16 +358,13 @@ function main(
         for genre in all_genres
             matches = items[items[:, genre], "item"]
             mask = [x in matches for x in test_hits_df.item]
-            genre_hr = round(mean(hits[mask]), digits=2)
+            genre_hr = round(mean(hits_metric[mask]), digits=2)
             genre_ndcg = round(mean(ndcgs[mask]), digits=2)
             record["hr_$genre"] = genre_hr
-            record["hits_$genre"] = sum(hits[mask])
+            record["hits_$genre"] = sum(hits_metric[mask])
             record["ndcg_$genre"] = genre_ndcg
-            #print("$genre $genre_hr|")
         end 
 
-        # == Example Users == 
-        #rand_users = shuffle(1:n_users)[1:3]
 
 
         push!(records, record)

@@ -1,15 +1,36 @@
 include("./mf_simple.jl")
 
-epochs, embedding_dim, frac, learning_rate, regularization, n_negatives = (
-	20, 16, 0.1, 0.002, 0.005, 8
+load_config = DataLoadingConfig(
+	0, "2000-12-29T23:42:56.4",
+	"ml-1m", 1.0
 )
-lever_size = 0
+lever = Lever(0, "All", false, "strike")
+epochs = 2
+trn_config = TrainingConfig(
+	epochs, 15, # because bias is one of the dimensions
+	0.005, #reg
+    8, 
+	0.002, #lr
+    0.1
+)
+
+lever_size = 0.1
+
+outpath = "results/test"
+modelname = "$outpath/$epochs.jld"
+mkpath(outpath)
+
 res = main(
-    epochs=epochs, learning_rate=learning_rate, regularization=regularization,
-    frac=frac, n_negatives=8, lever_size=lever_size, outname="results/test.csv", model_filename="models/test.jld"
+    load_config, trn_config, outpath,
+    lever=lever,
+    load_model=false,
+    modelname=modelname
 )
 
 res = main(
-    epochs=epochs, learning_rate=learning_rate, regularization=regularization,
-    frac=frac, n_negatives=8, lever_size=lever_size, outname="results/test.csv", model_filename="models/test.jld", load_model=true
+    load_config, trn_config, outpath,
+    lever=lever,
+    load_model=false,
+    modelname=modelname,
+    load_model=true
 )

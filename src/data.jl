@@ -1,5 +1,10 @@
 using CSV, DataFrames, Printf, Random, Dates
 
+
+"""
+Loads a DataFrame with metadata about individual items. 
+One row per item.
+"""
 function get_item_df(item_filename, delim, datarow=1)
     item_df = CSV.read(item_filename, DataFrame, datarow=datarow, delim=delim, header=["orig_item", "name", "genres"])
     genre_arrs = [split(x, '|') for x in item_df.genres]
@@ -12,13 +17,8 @@ function get_item_df(item_filename, delim, datarow=1)
         vals = [genre in x for x in genre_arrs]
         item_df[:, genre] = vals
     end
-    item_df, all_genres
+    return item_df, all_genres
 end
-
-function assign_hits!(df)
-    df[:, "hit"] = df.rating .>= 0
-end
-
 
 
 """
@@ -29,10 +29,11 @@ Modifies df and return hidden negatives and hidden hits
 
 This replicates evaluation fron Neural Collaborative Filtering etc.
 """
-function leave_out_test!(df::DataFrame, n_test_negatives::Any=100, cutoff=false)
+function leave_out_test(df::DataFrame, n_test_negatives::Any=100, cutoff=false)
     sort!(df, [:orig_user, :utc])
     df[:, "is_test"] = fill(false, size(df)[1])
     n_users = length(unique(df.orig_user))
+
     if n_test_negatives == 0
         hidden_negatives = zeros(n_users, length(unique(df.orig_item)))
     else
@@ -46,13 +47,8 @@ function leave_out_test!(df::DataFrame, n_test_negatives::Any=100, cutoff=false)
             seen_items = group[1:end-1, "orig_item"]
         else
             cutoff_utc = datetime2unix(DateTime(cutoff))
-            #df[:, "do_drop"] = fill(false, size(df)[1])
             after_cutoff_mask = group.utc .> cutoff_utc
-            #after_cutoff = group[after_cutoff, :]
-            #after_cutoff[1, "is_test"] = true
-            #after_cutoff[2:end, "do_drop"] = true
             group[after_cutoff_mask, "is_test"] .= true
-
             seen_items = group[.!after_cutoff_mask, "orig_item"]
         end
         
@@ -66,8 +62,7 @@ function leave_out_test!(df::DataFrame, n_test_negatives::Any=100, cutoff=false)
     end
 
     hidden_hits = df[df.is_test .== true, :]
-    df = df[df.is_test .== false, :]
-    return hidden_negatives, hidden_hits
+    return df[df.is_test .== false, :], hidden_hits, hidden_negatives
 end
 
 function get_renumbering_dict(df, col)
@@ -86,11 +81,11 @@ end
 
 function renumber!(df, item_df, hidden_hits, hidden_negatives)
     # renumber users and items so they are continuous indices
-    
-
     user_d = get_renumbering_dict(df, :orig_user)
     item_d = get_renumbering_dict(df, :orig_item)
 
+    # if an item or user does not appear in the TRAIN set (`df`)
+    # then it will be assigned value "-1"
     function get_item(x)
         if haskey(item_d, x)
             return item_d[x]
@@ -112,7 +107,6 @@ function renumber!(df, item_df, hidden_hits, hidden_negatives)
 
     hidden_hits[:, "user"] = map(get_user, hidden_hits.orig_user)
     hidden_hits[:, "item"] = map(get_item, hidden_hits.orig_item)
-    #hidden_negatives =
     item_df[:, "item"] = map(get_item, item_df.orig_item)
     return map(get_item, hidden_negatives)
 end
@@ -132,13 +126,11 @@ function sample_frac_users(df, col, frac)
     return sample
 end
 
-function targeted_lever(df, item_df, lever)
-    lever_users = sample_frac_users(df, :user, lever.size)
-
+function targeted_lever(df, item_df, lever_users)
     # figure out which items might be "up for grabs" (to delete or poison)
     elig_items = item_df[item_df[:, lever.genre], "item"]
 
-    matching_obs_mask = [!(x in elig_items) for x in df.item] .& [x in lever_users for x in df.user]
+    matching_obs_mask = [(x in elig_items) for x in df.item] .& [x in lever_users for x in df.user]
     if lever.type == "strike"
         # do the dropping!
         df = df[.!matching_obs_mask, :]
@@ -158,19 +150,32 @@ function targeted_lever(df, item_df, lever)
     return df
 end
 
-function general_lever(df, item_df, lever)
-    lever_users = sample_frac_users(df, :user, lever.size)
+function general_lever(df, lever_users)
     mask = [(x in lever_users) for x in df.user]
 
     if lever.type == "strike"
         return df[.!mask, :]
+
     elseif lever.type == "poison"
         elig_switches = unique(df.item)
         df[mask, :item] = rand(elig_switches, sum(mask))
+        # return test df as is
         return df
     end
 end
 
+"""
+hits will depend on the size of the test set (what's the cutoff)
+negatives will be one row per user.
+"""
+
+function create_test_without_participants(hits, negatives, lever_users)
+    not_participant_mask = [!(x in lever_users) for x in hits.user]
+    indices = [i for i in 1:size(negatives, 1) if !(i in lever_users)]
+    non_participant_hits = hits[not_participant_mask, :]
+    non_participant_negatives = negatives[indices, :]
+    return non_participant_hits, non_participant_negatives
+end
     
 function load_custom(
     config, filename, lever; delim::String="\t",
@@ -185,10 +190,10 @@ function load_custom(
     end
 
     # currently we copy NCF and use ALL Ratings as hit
-    assign_hits!(df)
+    df[:, "hit"] = df.rating .>= 0
 
     # leave-one-out data splitting
-    hidden_negatives, hidden_hits = leave_out_test!(df, config.n_test_negatives, config.cutoff)
+    df, hidden_hits, hidden_negatives = leave_out_test(df, config.n_test_negatives, config.cutoff)
 
     # get item info (e.g. movie genres)
     item_df, all_genres = get_item_df(item_filename, delim, datarow)
@@ -200,17 +205,21 @@ function load_custom(
     n_items = length(unique(df.item))
     n_users = length(unique(df.user))
 
-    # do the deletion / modification
+    # participants = people engaging in data leverage. e.g. they will delete their data or poison it.
+    participants = sample_frac_users(df, :user, lever.size)
     if lever.size > 0
         if lever.genre != "All"
-            df = targeted_lever(df, item_df, lever)
+            df = targeted_lever(df, item_df, participants)
         else
-            df = general_lever(df, item_df, lever)
+            df = general_lever(df, participants)
         end
+        
     end
+    subj_hits, subj_negatives = create_test_without_participants(hidden_hits, hidden_negatives, participants)
 
     cols = ["user", "item", "hit"]
 
-    return df[:, cols], hidden_hits[:, cols], hidden_negatives, n_users, n_items, item_df, all_genres
+    return df[:, cols], hidden_hits[:, cols], hidden_negatives,
+        subj_hits[:, cols], subj_negatives, n_users, n_items, item_df, all_genres
     
 end
