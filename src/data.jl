@@ -123,6 +123,7 @@ function renumber!(train_df, item_df, test_df, negatives)
             renumbered_negatives[new_user_id] = new_item_ids
         end
     end
+    renumbered_negatives[-1] = negatives[-1]
     return renumbered_negatives
 end
 
