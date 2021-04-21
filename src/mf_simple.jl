@@ -181,29 +181,46 @@ evalute the recommender model using "leave last out" (holdout LAST hit item + 10
 based on this code/paper: https://github.com/hexiangnan/neural_collaborative_filtering/blob/master/evaluate.py
 """
 function evaluate(
-    model::MfModel, test_hits::Matrix{Int},
-    test_negatives::Matrix{Int}, k::Int;
+    model::MfModel, hit_triplets::Matrix{Int},
+    negatives::Dict{}, k::Int;
     print_users=[]
 )
 
     hits = []
     ndcgs = []
-    for col in 1:size(test_hits, 2)
-        triplet_col = test_hits[:, col]
-        negatives_col = test_negatives[:, triplet_col[1]]
-        # drop the zeros (no item)
-        negatives_col = [x for x in negatives_col if x != 0]
+    topk_report = Dict()
+    for col in 1:size(hit_triplets, 2)
+        triplet_col = hit_triplets[:, col]
+        user = triplet_col[1]
+        # if triplet_col[1] == -1
+        #     triplet_col[1] = shuffle(1:size(negatives,2))[1]
+        # end
+        # get the random negative items to rank alongside the "hit"
+        negatives_col = negatives[user]
+        # drop the zeros (no item). Only needed if negatives is an array. As of 4/21, it's a Dict.
+        #negatives_col = [x for x in negatives_col if x != 0]
+
         save_topk = false
-        if triplet_col[1] in print_users
+        if user in print_users
             save_topk = true
         end
-        hit, ndcg = eval_one_rating(model, triplet_col, negatives_col, k, save_topk=save_topk)
+        hit, ndcg, topk = eval_one_rating(model, triplet_col, negatives_col, k, save_topk=save_topk)
         append!(hits, hit)
         append!(ndcgs, ndcg)
+        if user in print_users
+            topk_report[user] = [triplet_col[2], topk]
+        end
+        
     end
-    return hits, ndcgs
+    return hits, ndcgs, topk_report
 end
 
+"""
+Evaluate one "hit". 
+We create a list of user-specific "no-hits" (negatives) and one hit. We rank this list and see if the hit appears in top k.
+
+Returns hit rate at k, ndcg at k, and 
+"""
 function eval_one_rating(model::MfModel, triplet::Vector{Int}, negatives::Vector{Int}, k::Int; save_topk=false)
     items = copy(negatives)
     user, target, hit = triplet
@@ -222,7 +239,6 @@ function eval_one_rating(model::MfModel, triplet::Vector{Int}, negatives::Vector
     if k > length(values(d))
         k = length(values(d))
     end
-    # print(items, "\n")
     topk = sort(collect(zip(values(d),keys(d))), rev=true)[1:k]
     if save_topk
         dest = "$(model.outpath)/topk/$user.jld"
@@ -231,44 +247,30 @@ function eval_one_rating(model::MfModel, triplet::Vector{Int}, negatives::Vector
 
     hr_at_k = get_hr(topk, target)
     ndcg_at_ak = get_ndcg(topk, target)
-    return [hr_at_k, ndcg_at_ak]
+    return [hr_at_k, ndcg_at_ak, topk]
 end
 
-# for REPL
-# epochs = 20
-# embedding_dim = 16
-# stdev = 0.1
-# frac = 1.0
-# lever_size = 0
-# lever_genre = "All"
-# lever_type = "strike"
-# learning_rate = 0.01
-# regularization = 0.005
-# n_negatives = 8
-
-
-
 function main(
-    data_loading_config::DataLoadingConfig,
+    data_config::DataLoadingConfig,
     trn_config::TrainingConfig,
     outpath::String;
     lever::Lever,
     k::Int = 10, load_model=false, modelname=""
 )
-    if data_loading_config.dataset == "ml-1m"
+    if data_config.dataset == "ml-1m"
         filename = "ml-1m/ratings.dat"
         item_filename = "ml-1m/movies.dat"
         delim = "::"
         datarow = 1
-    elseif data_loading_config.dataset == "ml-25m"
+    elseif data_config.dataset == "ml-25m"
         filename = "ml-25m/ratings.csv"
         item_filename = "ml-25m/movies.csv"
         delim = ","
         datarow = 2 
     end
         
-    train_df, test_hits_df, test_negatives, subj_hits_df, subj_negatives, n_users, n_items, items, all_genres = load_custom(
-        data_loading_config,
+    train_df, test_df, unseen_negatives, subj_df, n_users, n_items, items, all_genres = load_custom(
+        data_config,
         filename, lever, delim=delim,
         item_filename=item_filename, datarow=datarow
     )
@@ -278,18 +280,14 @@ function main(
     my_convert = x -> copy(transpose(convert(Matrix{Int}, x)))
 
     train = my_convert(train_df[:, ["user", "item"]])
-    # TODO: could change the name of test_hits. It's a little confusing considered that hits is a metric.
-    test_hits = my_convert(test_hits_df)
-    test_negatives = my_convert(test_negatives)
-
-    subj_hits = my_convert(subj_hits_df)
-    subj_negatives = my_convert(subj_negatives)    
+    test = my_convert(test_df)
+    #unseen_negatives = my_convert(unseen_negatives)
+    subj = my_convert(subj_df)
 
     n_train = size(train, 2)
-    n_test = size(test_hits, 2)
-    n_subj = size(subj_hits, 2)
+    n_test = size(test, 2)
+    n_subj = size(subj, 2)
     print("n_users: $n_users, n_items: $n_items, n_train: $n_train, n_test: $n_test, n_subj: $n_subj \n")
-
 
     # init the model. Embeddings are drawn from normal, biases start at zero.
     if load_model && isfile(modelname)
@@ -307,12 +305,13 @@ function main(
         model = MfModel(u_emb, i_emb, u_b, i_b, bias, 1, outpath)
     end
     
-    init_hits, init_ndcgs = evaluate(model, test_hits, test_negatives, k)
+    init_hits, init_ndcgs, init_topk = evaluate(model, test, unseen_negatives, k)
     rand_hr = mean(init_hits)
     rand_ndcg = mean(init_ndcgs)
     print("Starting eval: HR: $rand_hr | NDCG: $rand_ndcg\n")
 
     records = []
+    topk_records = []
     for epoch=model.epoch:trn_config.epochs
         model.epoch = epoch
         # print on 1, 10, 20, ... last.
@@ -335,37 +334,38 @@ function main(
         # == Evaluate ==
         t_start_eval = time()
         rand_users = shuffle(1:n_users)[1:3]
-        hits_metric, ndcgs = evaluate(model, test_hits, test_negatives, k, print_users=rand_users)
-        subj_hits_metric, subj_ndcgs = evaluate(model, subj_hits, subj_negatives, k)
-        hr = mean(hits_metric)
+        hits, ndcgs, topk = evaluate(model, test, unseen_negatives, k, print_users=rand_users)
+        hr = mean(hits)
         ndcg = mean(ndcgs)
-        subj_hr = mean(subj_hits_metric)
-        subj_ndcg = mean(subj_ndcgs)
-
+        if epoch == trn_config.epochs # all done
+            push!(topk_records, topk)
+        end
         record["eval_time_elapsed"] =  time() - t_start_eval
         record["hr"] = hr
         record["ndcg"] = ndcg
+        record["loss"] = mean_loss
+
+        subj_hits, subj_ndcgs, subj_topk = evaluate(model, subj, unseen_negatives, k)
+        subj_hr = mean(subj_hits)
+        subj_ndcg = mean(subj_ndcgs)
         record["subj_hr"] = subj_hr
         record["subj_ndcg"] = subj_ndcg
-        record["loss"] = mean_loss
 
         # == Print and Save to Dict ==
         round5 = x -> round(x, digits=5)
-        s1, s2, s3, s4, s5 = map(round5, [hr, ndcg, mean_loss, record["fit_time_elapsed"], record["eval_time_elapsed"]])
-        print("$epoch:\t HR: $s1, NDCG: $s2, TrainL: $s3, Times: $s4, $s5\n")
+        s1, s2, s3, s4, s5, s6 = map(round5, [hr, ndcg, subj_hr, mean_loss, record["fit_time_elapsed"], record["eval_time_elapsed"]])
+        print("$epoch:\t HR: $s1, NDCG: $s2, SUBJ HR: $s3, TrainL: $s4, Times: $s5, $s6\n")
         
         # == Genre Specific Scores ==
         for genre in all_genres
             matches = items[items[:, genre], "item"]
-            mask = [x in matches for x in test_hits_df.item]
-            genre_hr = round(mean(hits_metric[mask]), digits=2)
+            mask = [x in matches for x in test_df.item]
+            genre_hr = round(mean(hits[mask]), digits=2)
             genre_ndcg = round(mean(ndcgs[mask]), digits=2)
             record["hr_$genre"] = genre_hr
-            record["hits_$genre"] = sum(hits_metric[mask])
+            record["hits_$genre"] = sum(hits[mask])
             record["ndcg_$genre"] = genre_ndcg
-        end 
-
-
+        end
 
         push!(records, record)
         
@@ -378,5 +378,13 @@ function main(
     epoch = model.epoch
     final_outname = "$outpath/$epoch-final.csv"
     write_output(results, final_outname)
+
+    example_results = DataFrame(topk_records[1])
+    for record in topk_records[2:end]
+        push!(example_results, record)
+    end
+    worksheet_outname = "$outpath/worksheet.csv"
+    write_output(example_results, final_outname)
+
     return results
 end

@@ -1,7 +1,7 @@
 include("./mf_simple.jl")
 
-load_config = DataLoadingConfig(
-	0, "2000-12-29T23:42:56.4",
+data_config = DataLoadingConfig(
+	10, "2000-12-29T23:42:56.4",
 	"ml-1m", 1.0
 )
 lever = Lever(0, "All", false, "strike")
@@ -14,23 +14,30 @@ trn_config = TrainingConfig(
     0.1
 )
 
-lever_size = 0.1
-
 outpath = "results/test"
 modelname = "$outpath/$epochs.jld"
 mkpath(outpath)
 
 res = main(
-    load_config, trn_config, outpath,
+    data_config, trn_config, outpath,
     lever=lever,
     load_model=false,
     modelname=modelname
 )
 
+# try loading the prev model
 res = main(
-    load_config, trn_config, outpath,
+    data_config, trn_config, outpath,
     lever=lever,
     load_model=false,
     modelname=modelname,
     load_model=true
 )
+
+# try without a strike
+lever2 = Lever(0.1, "All", false, "strike")
+
+
+# try with poison
+lever = Lever(0.1, "All", false, "poison")
+

@@ -31,17 +31,19 @@ This replicates evaluation fron Neural Collaborative Filtering etc.
 """
 function leave_out_test(df::DataFrame, n_test_negatives::Any=100, cutoff=false)
     sort!(df, [:orig_user, :utc])
-    df[:, "is_test"] = fill(false, size(df)[1])
+    df[:, "is_test"] = fill(false, size(df, 1))
     n_users = length(unique(df.orig_user))
 
-    if n_test_negatives == 0
-        hidden_negatives = zeros(n_users, length(unique(df.orig_item)))
-    else
-        hidden_negatives = zeros(n_users, n_test_negatives)
-    end
+    # if n_test_negatives == 0
+    #     hidden_negatives = zeros(n_users, length(unique(df.orig_item)))
+    # else
+    #     hidden_negatives = zeros(n_users, n_test_negatives)
+    # end
+    negatives = Dict()
     all_items = unique(df.orig_item)
 
     for group in groupby(df, :orig_user)
+        user_id = group[1, "orig_user"]
         if cutoff == false
             group[end, "is_test"] = true
             seen_items = group[1:end-1, "orig_item"]
@@ -54,15 +56,18 @@ function leave_out_test(df::DataFrame, n_test_negatives::Any=100, cutoff=false)
         
         unseen_items = setdiff(all_items, seen_items)
         if n_test_negatives == 0
-            #push!(hidden_negatives, shuffle(unseen_items)[1:end])
-            hidden_negatives[group[1, "orig_user"], 1:length(unseen_items)] = shuffle(unseen_items)[1:end]
+            #hidden_negatives[,1:length(unseen_items)] = shuffle(unseen_items)[1:end]
+            negatives[user_id] = shuffle(unseen_items)[1:end]
         else
-            hidden_negatives[group[1, "orig_user"], :] = shuffle(unseen_items)[1:n_test_negatives]
+            negatives[user_id] = shuffle(unseen_items)[1:n_test_negatives]
         end
     end
+    
+    # set negatives for unseen users
+    negatives[-1] = all_items
 
-    hidden_hits = df[df.is_test .== true, :]
-    return df[df.is_test .== false, :], hidden_hits, hidden_negatives
+    hidden_df = df[df.is_test .== true, :]
+    return df[df.is_test .== false, :], hidden_df, negatives
 end
 
 function get_renumbering_dict(df, col)
@@ -79,12 +84,12 @@ function get_renumbering_dict(df, col)
 end
 
 
-function renumber!(df, item_df, hidden_hits, hidden_negatives)
+function renumber!(train_df, item_df, test_df, negatives)
     # renumber users and items so they are continuous indices
-    user_d = get_renumbering_dict(df, :orig_user)
-    item_d = get_renumbering_dict(df, :orig_item)
+    user_d = get_renumbering_dict(train_df, :orig_user)
+    item_d = get_renumbering_dict(train_df, :orig_item)
 
-    # if an item or user does not appear in the TRAIN set (`df`)
+    # if an item or user does not appear in the TRAIN set (`train_df`)
     # then it will be assigned value "-1"
     function get_item(x)
         if haskey(item_d, x)
@@ -102,13 +107,23 @@ function renumber!(df, item_df, hidden_hits, hidden_negatives)
         end
     end
 
-    df[:, "user"] = map(get_user, df.orig_user)
-    df[:, "item"] = map(get_item, df.orig_item)
+    train_df[:, "user"] = map(get_user, train_df.orig_user)
+    train_df[:, "item"] = map(get_item, train_df.orig_item)
 
-    hidden_hits[:, "user"] = map(get_user, hidden_hits.orig_user)
-    hidden_hits[:, "item"] = map(get_item, hidden_hits.orig_item)
+    test_df[:, "user"] = map(get_user, test_df.orig_user)
+    test_df[:, "item"] = map(get_item, test_df.orig_item)
+
     item_df[:, "item"] = map(get_item, item_df.orig_item)
-    return map(get_item, hidden_negatives)
+
+    renumbered_negatives = Dict()
+    for (user, items) in negatives
+        new_user_id = get_user(user)
+        new_item_ids = [get_item(item) for item in items]
+        if new_user_id != -1
+            renumbered_negatives[new_user_id] = new_item_ids
+        end
+    end
+    return renumbered_negatives
 end
 
 function toss_data(df, frac)
@@ -168,15 +183,22 @@ end
 hits will depend on the size of the test set (what's the cutoff)
 negatives will be one row per user.
 """
-
 function create_test_without_participants(hits, negatives, lever_users)
     not_participant_mask = [!(x in lever_users) for x in hits.user]
-    indices = [i for i in 1:size(negatives, 1) if !(i in lever_users)]
+    #indices = [i for i in 1:size(negatives, 1) if !(i in lever_users)]
     non_participant_hits = hits[not_participant_mask, :]
-    non_participant_negatives = negatives[indices, :]
-    return non_participant_hits, non_participant_negatives
+    #non_participant_negatives = negatives[indices, :]
+    return non_participant_hits
 end
     
+"""
+Custom data loader.
+
+Returns many
+ train_df - train as DataFrame
+ test_df - test as DataFrame
+ negatives per user
+"""
 function load_custom(
     config, filename, lever; delim::String="\t",
     item_filename::String="", datarow::Int=1,
@@ -184,42 +206,44 @@ function load_custom(
     # handle headers in file.
     df = CSV.read(filename, DataFrame, delim=delim, datarow=datarow, header=["orig_user", "orig_item", "rating", "utc"])
     
-    # Here, we can toss some data to train faster, e.g. for testing
+    # Here, we can toss some data to make everything faster, e.g. for writing test scripts.
     if config.frac != 1.0
         df = toss_data(df, config.frac)
     end
 
-    # currently we copy NCF and use ALL Ratings as hit
+    # currently we copy NCF paper and use ALL Ratings as hit
     df[:, "hit"] = df.rating .>= 0
 
-    # leave-one-out data splitting
-    df, hidden_hits, hidden_negatives = leave_out_test(df, config.n_test_negatives, config.cutoff)
+    # leave-out-some data splitting (either one test per user, or use a data cutoff.)
+    train_df, test_df, unseen_negatives = leave_out_test(df, config.n_test_negatives, config.cutoff)
 
     # get item info (e.g. movie genres)
     item_df, all_genres = get_item_df(item_filename, delim, datarow)
 
     # renumber user and items so they can act as matrix indices
-    # modifies df, item_df, hidden_htis. Return hidden_negatives (matrix)
-    hidden_negatives = renumber!(df, item_df, hidden_hits, hidden_negatives)
+    # modifies df, item_df, hidden_htis. Return negatives (matrix)
+    unseen_negatives = renumber!(train_df, item_df, test_df, unseen_negatives)
         
-    n_items = length(unique(df.item))
-    n_users = length(unique(df.user))
+    n_items = length(unique(train_df.item))
+    n_users = length(unique(train_df.user))
 
     # participants = people engaging in data leverage. e.g. they will delete their data or poison it.
-    participants = sample_frac_users(df, :user, lever.size)
+    participants = sample_frac_users(train_df, :user, lever.size)
     if lever.size > 0
         if lever.genre != "All"
-            df = targeted_lever(df, lever, participants, item_df)
+            df = targeted_lever(train_df, lever, participants, item_df)
         else
-            df = general_lever(df, lever, participants)
-        end
-        
+            df = general_lever(train_df, lever, participants)
+        end 
     end
-    subj_hits, subj_negatives = create_test_without_participants(hidden_hits, hidden_negatives, participants)
 
+    # Also create a test set WITHOUT leverage participants.
+    subj_df = create_test_without_participants(test_df, unseen_negatives, participants)
+
+    # columns we will keep from the dataframes.
     cols = ["user", "item", "hit"]
 
-    return df[:, cols], hidden_hits[:, cols], hidden_negatives,
-        subj_hits[:, cols], subj_negatives, n_users, n_items, item_df, all_genres
+    return train_df[:, cols], test_df[:, cols], unseen_negatives,
+        subj_df[:, cols], n_users, n_items, item_df, all_genres
     
 end
