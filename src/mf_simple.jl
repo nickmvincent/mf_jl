@@ -58,6 +58,12 @@ function predict_one(m::MfModel, user::Int, item::Int)
     )
 end
 
+function predict_unseen(m::MfModel)
+    return m.b
+end
+
+
+
 """
 Make a prediction for each user x item.
     users - Matrix of users. Must be same length as items.
@@ -70,7 +76,7 @@ function predict(model::MfModel, users::Vector{Int}, items::Vector{Int})
         user = users[i]
         item = items[i]
         if user == -1 || item == -1
-            preds[i] = 0
+            preds[i] = predict_unseen(model)
         else
             preds[i] = predict_one(model, user, item)
         end
@@ -188,7 +194,7 @@ function evaluate(
 
     hits = []
     ndcgs = []
-    topk_report = Dict()
+    topk_records = []
     for col in 1:size(hit_triplets, 2)
         triplet_col = hit_triplets[:, col]
         user = triplet_col[1]
@@ -208,11 +214,15 @@ function evaluate(
         append!(hits, hit)
         append!(ndcgs, ndcg)
         if user in print_users
-            topk_report[user] = [triplet_col[2], topk]
+            record = Dict()
+            record["user"] = user
+            record["item"] = triplet_col[2]
+            record["topk"] = [x[2] for x in topk]
+            push!(topk_records, record)
         end
         
     end
-    return hits, ndcgs, topk_report
+    return hits, ndcgs, topk_records
 end
 
 """
@@ -338,7 +348,7 @@ function main(
         hr = mean(hits)
         ndcg = mean(ndcgs)
         if epoch == trn_config.epochs # all done
-            push!(topk_records, topk)
+            append!(topk_records, topk)
         end
         record["eval_time_elapsed"] =  time() - t_start_eval
         record["hr"] = hr
@@ -379,12 +389,15 @@ function main(
     final_outname = "$outpath/$epoch-final.csv"
     write_output(results, final_outname)
 
+    print(topk_records, "\n")
     example_results = DataFrame(topk_records[1])
     for record in topk_records[2:end]
-        push!(example_results, record)
+        append!(example_results, DataFrame(record))
     end
+    print(example_results, "\n")
+
     worksheet_outname = "$outpath/worksheet.csv"
-    write_output(example_results, final_outname)
+    write_output(example_results, worksheet_outname)
 
     return results
 end
