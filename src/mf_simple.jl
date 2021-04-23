@@ -390,14 +390,15 @@ function main(
     write_output(results, final_outname)
 
     print(topk_records, "\n")
-    example_results = DataFrame(topk_records[1])
-    for record in topk_records[2:end]
-        append!(example_results, DataFrame(record))
+    if length(topk_records > 0)
+        example_results = DataFrame(topk_records[1])
+        for record in topk_records[2:end]
+            append!(example_results, DataFrame(record))
+        end
+        print(example_results, "\n")
+
+        worksheet_outname = "$outpath/worksheet.csv"
+        write_output(example_results, worksheet_outname)
     end
-    print(example_results, "\n")
-
-    worksheet_outname = "$outpath/worksheet.csv"
-    write_output(example_results, worksheet_outname)
-
     return results
 end

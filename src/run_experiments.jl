@@ -263,7 +263,7 @@ for lever_size in lever_sizes
 		end
 		cols = [
 			"lever_size", "n_train", "lever_genre", "lever_type",
-			"hr", "hr_Action", "hr_Comedy", "hr_Drama"
+			"hr", "hr_Action", "hr_Comedy", "subj_hr"
 			#"hits_Action", "hits_Comedy", "hits_Drama"
 		]
 		#results[:, "lever_type"] .= lever_type
