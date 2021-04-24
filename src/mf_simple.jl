@@ -390,7 +390,7 @@ function main(
     write_output(results, final_outname)
 
     print(topk_records, "\n")
-    if length(topk_records > 0)
+    if length(topk_records) > 0
         example_results = DataFrame(topk_records[1])
         for record in topk_records[2:end]
             append!(example_results, DataFrame(record))
