@@ -290,7 +290,7 @@ max_train = maximum(nice_df.n_train)
 nice_df[:, "Observations Lost"] = max_train .- nice_df.n_train
 
 # ╔═╡ c625e22e-8278-11eb-2c1d-21291a620125
-cols_to_stack = ["hr", "hr_Action", "hr_Comedy", "hr_Drama"]
+cols_to_stack = ["hr", "hr_Action", "hr_Comedy"]
 #cols_to_stack = ["hits_Action", "hits_Comedy", "hits_Drama"]
 
 # ╔═╡ f064368e-803a-11eb-2caa-15eabf7b7f19
@@ -307,8 +307,8 @@ CSV.write("$outpath/stacked.csv", stacked)
 stacked_emojis = copy(stacked)
 
 # ╔═╡ 248e2b10-827a-11eb-34ea-45417691123f
-stacked_emojis.variable = replace(
-	stacked.variable, "hr_Drama" => "🎭", "hr_Comedy"=>"😂", "hr_Action"=>"🤜")
+# stacked_emojis.variable = replace(
+# 	stacked.variable, "hr_Drama" => "🎭", "hr_Comedy"=>"😂", "hr_Action"=>"🤜")
 
 # ╔═╡ 03dba780-827a-11eb-289e-53cbc509bd14
 stacked_emojis
