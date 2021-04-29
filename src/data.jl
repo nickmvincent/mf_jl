@@ -232,9 +232,9 @@ function load_custom(
     participants = sample_frac_users(train_df, :user, lever.size)
     if lever.size > 0
         if lever.genre != "All"
-            df = targeted_lever(train_df, lever, participants, item_df)
+            train_df = targeted_lever(train_df, lever, participants, item_df)
         else
-            df = general_lever(train_df, lever, participants)
+            train_df = general_lever(train_df, lever, participants)
         end 
     end
 
